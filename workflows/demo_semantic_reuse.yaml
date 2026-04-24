@@ -1,0 +1,21 @@
+workflow_id: demo_semantic_reuse_v1
+name: "Semantic Reuse Demo"
+description: "Slightly different invoice summary requests that should reuse semantically similar prior work."
+default_model: gpt-4o-mini
+metadata:
+  warmup_inputs:
+    request: "Summarize invoice for Acme Corp"
+  measured_inputs:
+    request: "Summarize invoice for ACME Corporation"
+steps:
+  - step_id: summarize_invoice
+    step_type: llm_call
+    semantic_reuse: true
+    semantic_threshold: 0.90
+    compact: true
+    max_output_tokens: 60
+    messages:
+      - role: system
+        content: "You summarize invoice processing requests in one compact sentence."
+      - role: user
+        content: "{request}"

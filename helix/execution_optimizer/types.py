@@ -30,6 +30,11 @@ class ExecutionDecision:
     graph_node: Optional[GraphNode] = None
     kv_estimate: Optional[KVReuseEstimate] = None
     cache_key: Optional[str] = None
+    semantic_cache_hit: bool = False
+    semantic_reuse_applied: bool = False
+    similarity_score: float = 0.0
+    semantic_reuse_enabled: bool = False
+    semantic_input: str = ""
     reason: str = ""
 
 

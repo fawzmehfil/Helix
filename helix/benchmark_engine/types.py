@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from helix.workflow.types import StepResult
 
@@ -24,6 +24,16 @@ class BenchmarkResult:
     steps_cached: int
     steps_graph_reused: int
     steps_skipped: int
+    calls: int
+    raw_input_tokens: int
+    minimized_input_tokens: int
+    tokens_saved_by_minimization: int
+    optimization_overhead_tokens: int
+    net_token_change: int
+    semantic_cache_hits: int
+    avg_similarity_score: float
+    repair_attempts: int
+    repair_successes: int
     per_step: list[StepResult]
     timestamp: dt.datetime
 
@@ -41,10 +51,15 @@ class AttributionReport:
     tokens_saved: int
     tokens_saved_pct: float
     steps_reduced: int
+    calls_avoided: int
+    tokens_avoided: int
+    steps_eliminated: int
+    partial_recomputation_steps: int
     context_reuse_pct: float
     kv_simulation_pct: float
     graph_reuse_pct: float
     step_reduction_pct: float
+    warnings: list[str] = field(default_factory=list)
 
     def validate(self) -> None:
         """Assert percentages sum to ~100%."""
@@ -54,8 +69,7 @@ class AttributionReport:
             + self.graph_reuse_pct
             + self.step_reduction_pct
         )
-        if self.tokens_saved == 0 and self.steps_reduced == 0 and self.latency_saved_ms <= 0:
+        if self.tokens_saved <= 0 or self.steps_reduced < 0 or self.latency_saved_ms <= 0:
             assert abs(total) <= 1.0, "attribution percentages must sum to 0 when no savings"
         else:
             assert abs(total - 100.0) <= 1.0, "attribution percentages must sum to approximately 100"
-

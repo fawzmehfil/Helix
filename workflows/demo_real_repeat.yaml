@@ -1,0 +1,31 @@
+workflow_id: demo_real_repeat_v1
+name: "Real Repeat Benchmark"
+description: "Small real-API workflow designed to demonstrate full cache reuse on repeated input."
+default_model: claude-3-haiku-20240307
+metadata:
+  warmup_inputs:
+    topic: "local-first workflow optimization"
+  measured_inputs:
+    topic: "local-first workflow optimization"
+steps:
+  - step_id: outline
+    step_type: llm_call
+    messages:
+      - role: system
+        content: "You are a concise benchmark assistant. Answer in one short sentence."
+      - role: user
+        content: "Give one practical benefit of {topic}."
+  - step_id: risk
+    step_type: llm_call
+    messages:
+      - role: system
+        content: "You are a concise benchmark assistant. Answer in one short sentence."
+      - role: user
+        content: "Name one implementation risk of {topic}."
+  - step_id: metric
+    step_type: llm_call
+    messages:
+      - role: system
+        content: "You are a concise benchmark assistant. Answer in one short sentence."
+      - role: user
+        content: "Name one metric that proves {topic} is working."

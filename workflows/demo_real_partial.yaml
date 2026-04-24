@@ -1,0 +1,78 @@
+workflow_id: demo_real_partial_v1
+name: "Real Partial Recompute Benchmark"
+description: "Compact document-processing DAG with stable metadata/classification branches and changed body extraction."
+default_model: claude-3-haiku-20240307
+metadata:
+  warmup_inputs:
+    doc_type: "invoice"
+    region: "US"
+    body: "Invoice 1007 from Acme Medical for two imaging sensors and one calibration visit. Payment is due in thirty days."
+  measured_inputs:
+    doc_type: "invoice"
+    region: "US"
+    body: "Invoice 1007 from Acme Medical for three imaging sensors and one calibration visit. Payment is due in fifteen days."
+steps:
+  - step_id: extract_metadata
+    step_type: llm_call
+    compact: true
+    output_format: json
+    max_output_tokens: 60
+    messages:
+      - role: system
+        content: "Extract document metadata."
+      - role: user
+        content: "Return doc_type and region for doc_type={doc_type}, region={region}."
+  - step_id: classify_document
+    step_type: llm_call
+    depends_on: [extract_metadata]
+    input_projection:
+      extract_metadata:
+        fields: ["doc_type", "region"]
+    compact: true
+    output_format: json
+    max_output_tokens: 60
+    messages:
+      - role: system
+        content: "Classify a business document."
+      - role: user
+        content: "Classify this metadata: {extract_metadata.output}"
+  - step_id: extract_line_items
+    step_type: llm_call
+    compact: true
+    output_format: json
+    max_output_tokens: 80
+    messages:
+      - role: system
+        content: "Extract changed line-item facts."
+      - role: user
+        content: "Return items and due_days from: {body}"
+  - step_id: qc_static_fields
+    step_type: llm_call
+    depends_on: [extract_metadata, classify_document]
+    input_projection:
+      extract_metadata:
+        fields: ["doc_type", "region"]
+      classify_document:
+        fields: ["category", "confidence"]
+    compact: true
+    output_format: json
+    max_output_tokens: 60
+    messages:
+      - role: system
+        content: "Validate stable routing fields."
+      - role: user
+        content: "Validate metadata={extract_metadata.output}; classification={classify_document.output}"
+  - step_id: summarize_change
+    step_type: llm_call
+    depends_on: [extract_line_items]
+    input_projection:
+      extract_line_items:
+        fields: ["items", "due_days"]
+    compact: true
+    output_format: json
+    max_output_tokens: 60
+    messages:
+      - role: system
+        content: "Summarize invoice processing changes."
+      - role: user
+        content: "Summarize only these changed facts: {extract_line_items.output}"

@@ -66,8 +66,22 @@ class HelixConfig:
         cfg.runs_dir = os.environ.get("HELIX_RUNS_DIR", cfg.runs_dir)
         cfg.model_specs = {
             "fake": ModelSpec("fake", 60.0, 0.1, 0.0, 0.0),
-            "gpt-4o": ModelSpec("gpt-4o", 60.0, 0.1, 0.005, 0.005),
-            "claude-3-5-sonnet": ModelSpec("claude-3-5-sonnet", 80.0, 0.1, 0.003, 0.003),
+            "gpt-4o-mini": ModelSpec("gpt-4o-mini", 80.0, 0.1, 0.00015, 0.00060),
+            "gpt-4o": ModelSpec("gpt-4o", 60.0, 0.1, 0.0025, 0.01),
+            "claude-3-haiku-20240307": ModelSpec(
+                "claude-3-haiku-20240307",
+                120.0,
+                0.1,
+                0.00025,
+                0.00125,
+            ),
+            "claude-3-5-sonnet": ModelSpec("claude-3-5-sonnet", 80.0, 0.1, 0.003, 0.015),
         }
-        cfg.cost_table = {"fake": 0.0, "gpt-4o": 0.005, "claude-3-5-sonnet": 0.003}
+        cfg.cost_table = {
+            "fake": 0.0,
+            "gpt-4o-mini": 0.00015,
+            "gpt-4o": 0.0025,
+            "claude-3-haiku-20240307": 0.00025,
+            "claude-3-5-sonnet": 0.003,
+        }
         return cfg

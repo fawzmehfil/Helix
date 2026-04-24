@@ -17,7 +17,14 @@ class ReportFormatter:
     def _savings(self, pct: float, cost: bool = False) -> str:
         if cost and pct == 0:
             return "N/A"
+        if pct < 0:
+            return f"+{abs(pct):.1f}% regression"
         return f"-{pct:.1f}%"
+
+    def _saved_line(self, saved_pct: float, saved_value: str) -> str:
+        if saved_pct < 0:
+            return f"Increased: {saved_value} ({abs(saved_pct):.1f}% regression)"
+        return f"Saved:     {saved_value} ({saved_pct:.1f}%)"
 
     def format_attribution(self, report: AttributionReport) -> str:
         """Returns the terminal report string."""
@@ -81,6 +88,117 @@ class ReportFormatter:
         console.print(
             f"Graph:  {report.baseline.steps_executed} nodes  ({report.optimized.steps_graph_reused} reused this run)"
         )
+        if report.warnings:
+            console.print()
+            console.print("WARNING: Optimization regression detected")
+            for warning in report.warnings:
+                console.print(f"- {warning}")
+        return out.getvalue()
+
+    def format_real_benchmark(self, report: AttributionReport) -> str:
+        """Format the high-signal real API benchmark report."""
+        out = StringIO()
+        console = Console(file=out, force_terminal=False, width=100)
+        model = next((step.model for step in report.baseline.per_step if step.model != "unknown"), "unknown")
+        console.print("=== HELIX EXECUTION REPORT ===")
+        console.print()
+        console.print(f"Model: {model}")
+        console.print()
+        console.print("Latency:")
+        console.print(f"Baseline:   {report.baseline.total_latency_ms / 1000.0:.2f}s")
+        console.print(f"Optimized:  {report.optimized.total_latency_ms / 1000.0:.2f}s")
+        console.print(
+            self._saved_line(report.latency_saved_pct, f"{report.latency_saved_ms / 1000.0:.2f}s")
+        )
+        console.print()
+        console.print("Cost:")
+        console.print(f"Baseline:   ${report.baseline.estimated_cost_usd:.6f}")
+        console.print(f"Optimized:  ${report.optimized.estimated_cost_usd:.6f}")
+        console.print(self._saved_line(report.cost_saved_pct, f"${report.cost_saved_usd:.6f}"))
+        console.print()
+        console.print("Tokens:")
+        console.print(f"Baseline:   {report.baseline.total_tokens}")
+        console.print(f"Optimized:  {report.optimized.total_tokens}")
+        console.print(self._saved_line(report.tokens_saved_pct, str(report.tokens_saved)))
+        console.print()
+        console.print("Calls:")
+        console.print(f"Baseline:   {report.baseline.calls}")
+        console.print(f"Optimized:  {report.optimized.calls}")
+        console.print(f"Avoided:    {report.calls_avoided}")
+        console.print()
+        console.print("Context minimization:")
+        console.print(f"Raw input tokens:        {report.optimized.raw_input_tokens}")
+        console.print(f"Minimized input tokens:  {report.optimized.minimized_input_tokens}")
+        console.print(f"Tokens removed:          {report.optimized.tokens_saved_by_minimization}")
+        console.print(f"Overhead tokens:         {report.optimized.optimization_overhead_tokens}")
+        console.print(f"Net token change:        {report.optimized.net_token_change:+d}")
+        reduction = (
+            report.optimized.tokens_saved_by_minimization / report.optimized.raw_input_tokens * 100.0
+            if report.optimized.raw_input_tokens
+            else 0.0
+        )
+        console.print(f"Reduction:               {reduction:.1f}%")
+        console.print()
+        console.print("Attribution:")
+        console.print(f"Calls avoided:             {report.calls_avoided}")
+        console.print(f"Tokens avoided:            {report.tokens_avoided}")
+        console.print(f"Steps skipped:             {report.optimized.steps_cached + report.optimized.steps_graph_reused + report.optimized.steps_skipped}")
+        exact_cache_hits = report.optimized.steps_cached - report.optimized.semantic_cache_hits
+        console.print(f"Exact cache hits:          {exact_cache_hits}")
+        console.print(f"Semantic cache hits:       {report.optimized.semantic_cache_hits}")
+        console.print(f"Avg similarity score:      {report.optimized.avg_similarity_score:.3f}")
+        console.print(f"Graph reuse:               {report.optimized.steps_graph_reused}")
+        console.print(f"Steps eliminated:          {report.steps_eliminated}")
+        console.print(f"Partial recomputation:     {report.partial_recomputation_steps} reused steps")
+        console.print()
+        console.print("Structured output:")
+        console.print(f"Repair attempts:           {report.optimized.repair_attempts}")
+        success_rate = (
+            report.optimized.repair_successes / report.optimized.repair_attempts * 100.0
+            if report.optimized.repair_attempts
+            else 0.0
+        )
+        console.print(f"Repair success rate:       {success_rate:.1f}%")
+        console.print()
+        table = Table(title="Per-step optimized metrics", box=None)
+        table.add_column("step_id")
+        table.add_column("decision")
+        table.add_column("raw input", justify="right")
+        table.add_column("min input", justify="right")
+        table.add_column("removed", justify="right")
+        table.add_column("overhead", justify="right")
+        table.add_column("net", justify="right")
+        table.add_column("cache")
+        table.add_column("semantic")
+        table.add_column("similarity", justify="right")
+        table.add_column("repair")
+        table.add_column("cost", justify="right")
+        table.add_column("latency", justify="right")
+        for step in report.optimized.per_step:
+            table.add_row(
+                step.step_id,
+                step.decision.value,
+                str(step.raw_input_tokens),
+                str(step.minimized_input_tokens),
+                str(step.tokens_saved_by_minimization),
+                str(step.optimization_overhead_tokens),
+                f"{step.net_token_change:+d}",
+                "yes" if step.cache_hit else "no",
+                "yes" if step.semantic_cache_hit else "no",
+                f"{step.similarity_score:.3f}" if step.semantic_reuse_applied else "-",
+                "yes" if step.repair_attempted else "no",
+                f"${step.estimated_cost_usd:.6f}",
+                f"{step.latency_ms / 1000.0:.2f}s",
+            )
+        console.print(table)
+        console.print()
+        console.print("Warnings:")
+        if report.warnings:
+            console.print("WARNING: Optimization regression detected")
+            for warning in report.warnings:
+                console.print(f"- {warning}")
+        else:
+            console.print("- none")
         return out.getvalue()
 
     def format_run_result(self, result: RunResult) -> str:
@@ -104,4 +222,3 @@ class ReportFormatter:
             f"{result.mode}: latency={result.total_latency_ms:.0f}ms "
             f"tokens={result.total_tokens} steps={result.steps_executed}"
         )
-

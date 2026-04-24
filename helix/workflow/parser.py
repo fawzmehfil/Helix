@@ -31,6 +31,13 @@ class WorkflowParser:
                 depends_on=list(item.get("depends_on", [])),
                 cacheable=bool(item.get("cacheable", True)),
                 tags=list(item.get("tags", [])),
+                input_projection=dict(item.get("input_projection", {})),
+                output_format=item.get("output_format"),
+                compact=bool(item.get("compact", False)),
+                max_output_tokens=item.get("max_output_tokens"),
+                semantic_reuse=bool(item.get("semantic_reuse", False)),
+                semantic_threshold=float(item.get("semantic_threshold", 0.92)),
+                required_fields=list(item.get("required_fields", [])),
             )
             for item in data.get("steps", [])
         ]
@@ -66,4 +73,3 @@ class WorkflowParser:
                 if dep not in all_ids:
                     errors.append(f"step {step.step_id} depends on missing step {dep}")
         return errors
-

@@ -56,6 +56,7 @@ class ExecutionOptimizer:
             model = step.model or workflow.default_model or self.model_id
             snapshot = self.decomposer.decompose_messages(step.messages, step.step_id, run_id)
             key = CacheKey(snapshot.blocks, model)
+            semantic_input = "\n".join(str(message.get("content", "")) for message in step.messages)
             self._snapshots[step.step_id] = (snapshot, key, model)
             if not self.optimizations_enabled or not step.cacheable:
                 kv = self.kv_simulator.estimate(prev_snapshot, snapshot, model)
@@ -65,6 +66,8 @@ class ExecutionOptimizer:
                     ExecutionDecisionType.EXECUTE,
                     kv_estimate=kv,
                     cache_key=key.key,
+                    semantic_reuse_enabled=step.semantic_reuse,
+                    semantic_input=semantic_input,
                     reason=reason,
                 )
             else:
@@ -75,29 +78,59 @@ class ExecutionOptimizer:
                         ExecutionDecisionType.CACHE_HIT,
                         cache_entry=entry,
                         cache_key=key.key,
+                        semantic_reuse_enabled=step.semantic_reuse,
+                        semantic_input=semantic_input,
                         reason="resolved context and model matched cache key",
                     )
                 else:
-                    node = self.graph_reuser.find_reusable_node(snapshot, model)
-                    if node is not None:
+                    semantic_entry = None
+                    similarity = 0.0
+                    if step.semantic_reuse:
+                        semantic_entry, similarity = self.cache_store.find_semantic(
+                            step.step_id,
+                            model,
+                            semantic_input,
+                            step.semantic_threshold,
+                        )
+                    if semantic_entry is not None:
                         decision = ExecutionDecision(
                             step.step_id,
-                            ExecutionDecisionType.GRAPH_REUSE,
-                            graph_node=node,
+                            ExecutionDecisionType.CACHE_HIT,
+                            cache_entry=semantic_entry,
                             cache_key=key.key,
-                            reason="resolved context hash matched computation graph",
+                            semantic_cache_hit=True,
+                            semantic_reuse_applied=True,
+                            similarity_score=similarity,
+                            semantic_reuse_enabled=True,
+                            semantic_input=semantic_input,
+                            reason=f"semantic cache matched at {similarity:.3f}",
                         )
                     else:
-                        kv = self.kv_simulator.estimate(prev_snapshot, snapshot, model)
-                        total_time += kv.estimated_time_saved_ms
-                        total_cost += kv.estimated_cost_saved_usd
-                        decision = ExecutionDecision(
-                            step.step_id,
-                            ExecutionDecisionType.EXECUTE,
-                            kv_estimate=kv,
-                            cache_key=key.key,
-                            reason="no cache or graph match for resolved context",
-                        )
+                        node = self.graph_reuser.find_reusable_node(snapshot, model)
+                        if node is not None:
+                            decision = ExecutionDecision(
+                                step.step_id,
+                                ExecutionDecisionType.GRAPH_REUSE,
+                                graph_node=node,
+                                cache_key=key.key,
+                                semantic_reuse_enabled=step.semantic_reuse,
+                                semantic_input=semantic_input,
+                                reason="resolved context hash matched computation graph",
+                            )
+                        else:
+                            kv = self.kv_simulator.estimate(prev_snapshot, snapshot, model)
+                            total_time += kv.estimated_time_saved_ms
+                            total_cost += kv.estimated_cost_saved_usd
+                            decision = ExecutionDecision(
+                                step.step_id,
+                                ExecutionDecisionType.EXECUTE,
+                                kv_estimate=kv,
+                                cache_key=key.key,
+                                semantic_reuse_enabled=step.semantic_reuse,
+                                semantic_input=semantic_input,
+                                similarity_score=similarity,
+                                reason="no cache or graph match for resolved context",
+                            )
             decisions.append(decision)
             prev_snapshot = snapshot
             self._previous_snapshot_by_run[run_id] = snapshot
@@ -143,6 +176,8 @@ class ExecutionOptimizer:
             else None,
         )
         self.cache_store.put(key, entry)
+        if decision.semantic_reuse_enabled:
+            self.cache_store.put_semantic(key, entry, decision.step_id, model, decision.semantic_input)
         node = GraphNode(
             node_id=str(uuid.uuid4()),
             step_id=decision.step_id,

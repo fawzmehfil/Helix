@@ -27,12 +27,23 @@ def parse_inputs(items: tuple[str, ...]) -> dict[str, str]:
     return parsed
 
 
-def build_runner(backend: str, baseline: bool = False) -> WorkflowRunner:
+def build_runner(
+    backend: str,
+    baseline: bool = False,
+    cache_path: str | None = None,
+    graph_path: str | None = None,
+    model: str | None = None,
+    require_available: bool = False,
+) -> WorkflowRunner:
     """Construct a workflow runner with default local dependencies."""
     cfg = HelixConfig.default()
-    client = LLMClientFactory.create(backend or cfg.llm_backend, cfg.model)
-    cache = CacheStore(cfg.cache_db_path, cfg.cache)
-    graph = ComputationGraph(cfg.graph_db_path)
+    client = LLMClientFactory.create(
+        backend or cfg.llm_backend,
+        model or cfg.model,
+        require_available=require_available,
+    )
+    cache = CacheStore(cache_path or cfg.cache_db_path, cfg.cache)
+    graph = ComputationGraph(graph_path or cfg.graph_db_path)
     hasher = SemanticHasher()
     decomposer = ContextDecomposer(hasher)
     kv = KVSimulator(cfg.model_specs)
@@ -46,4 +57,3 @@ def build_runner(backend: str, baseline: bool = False) -> WorkflowRunner:
         optimizations_enabled=not baseline,
     )
     return WorkflowRunner(optimizer, client, EchoToolClient(), BenchmarkCollector(), baseline)
-
