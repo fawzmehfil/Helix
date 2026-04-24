@@ -1,0 +1,19 @@
+llm_backend: fake
+cache:
+  enabled: true
+  ttl_seconds: 86400
+  max_entries: 10000
+graph:
+  enabled: true
+kv_simulation:
+  enabled: true
+  model_specs:
+    fake:
+      tokens_per_second: 60
+      cache_hit_multiplier: 0.1
+      cost_per_1k_input_tokens: 0.0
+      cost_per_1k_output_tokens: 0.0
+benchmark:
+  cost_per_1k_tokens:
+    fake: 0.0
+

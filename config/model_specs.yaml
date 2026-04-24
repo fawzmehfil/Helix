@@ -1,0 +1,16 @@
+fake:
+  tokens_per_second: 60
+  cache_hit_multiplier: 0.1
+  cost_per_1k_input_tokens: 0.0
+  cost_per_1k_output_tokens: 0.0
+gpt-4o:
+  tokens_per_second: 60
+  cache_hit_multiplier: 0.1
+  cost_per_1k_input_tokens: 0.005
+  cost_per_1k_output_tokens: 0.005
+claude-3-5-sonnet:
+  tokens_per_second: 80
+  cache_hit_multiplier: 0.1
+  cost_per_1k_input_tokens: 0.003
+  cost_per_1k_output_tokens: 0.003
+

@@ -1,0 +1,41 @@
+workflow_id: demo_chain_v1
+name: "4-Step Demo Chain"
+description: "Deterministic four-step benchmark chain."
+default_model: fake
+steps:
+  - step_id: step_a
+    step_type: llm_call
+    model: fake
+    messages:
+      - role: system
+        content: "You are a helpful assistant."
+      - role: user
+        content: "Describe the concept of recursion in one sentence."
+  - step_id: step_b
+    step_type: llm_call
+    model: fake
+    depends_on: [step_a]
+    messages:
+      - role: system
+        content: "You are a helpful assistant."
+      - role: user
+        content: "Expand on this: {step_a.output}"
+  - step_id: step_c
+    step_type: llm_call
+    model: fake
+    depends_on: [step_b]
+    messages:
+      - role: system
+        content: "You are a helpful assistant."
+      - role: user
+        content: "Summarize: {step_b.output}"
+  - step_id: step_d
+    step_type: llm_call
+    model: fake
+    depends_on: [step_c]
+    messages:
+      - role: system
+        content: "You are a summarizer."
+      - role: user
+        content: "Give a one-word title for: {step_c.output}"
+

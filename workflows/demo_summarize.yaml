@@ -1,0 +1,23 @@
+workflow_id: summarize_v1
+name: "Summarize and Categorize"
+description: "Two-step local demo workflow."
+default_model: fake
+steps:
+  - step_id: summarize
+    step_type: llm_call
+    model: fake
+    messages:
+      - role: system
+        content: "You are a concise summarizer."
+      - role: user
+        content: "Summarize the following text in 2 sentences: {document}"
+  - step_id: categorize
+    step_type: llm_call
+    model: fake
+    depends_on: [summarize]
+    messages:
+      - role: system
+        content: "You are a document categorizer."
+      - role: user
+        content: "Assign one category from [technical, business, creative, other] to: {summarize.output}"
+

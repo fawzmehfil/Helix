@@ -1,0 +1,41 @@
+workflow_id: partial_change_v1
+name: "Partial Change Demo"
+description: "Four-step workflow with document input."
+default_model: fake
+steps:
+  - step_id: extract
+    step_type: llm_call
+    model: fake
+    messages:
+      - role: system
+        content: "You are a key-point extractor."
+      - role: user
+        content: "Extract key points from: {document}"
+  - step_id: format
+    step_type: llm_call
+    model: fake
+    depends_on: [extract]
+    messages:
+      - role: system
+        content: "You are a formatter."
+      - role: user
+        content: "Format these points as a numbered list: {extract.output}"
+  - step_id: translate
+    step_type: llm_call
+    model: fake
+    depends_on: [format]
+    messages:
+      - role: system
+        content: "You translate to Spanish."
+      - role: user
+        content: "Translate: {format.output}"
+  - step_id: title
+    step_type: llm_call
+    model: fake
+    depends_on: [translate]
+    messages:
+      - role: system
+        content: "You write titles."
+      - role: user
+        content: "Write a title for: {translate.output}"
+
