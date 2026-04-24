@@ -3,30 +3,38 @@ name: "Partial Change Demo"
 description: "Four-step workflow with document input."
 default_model: fake
 steps:
+  - step_id: style
+    step_type: llm_call
+    model: fake
+    messages:
+      - role: system
+        content: "You are a style guide generator. Keep the answer compact and deterministic."
+      - role: user
+        content: "Return a concise reporting style guide for Helix benchmark summaries."
   - step_id: extract
     step_type: llm_call
     model: fake
     messages:
       - role: system
-        content: "You are a key-point extractor."
+        content: "You are a key-point extractor. Keep the answer compact and deterministic."
       - role: user
         content: "Extract key points from: {document}"
   - step_id: format
     step_type: llm_call
     model: fake
-    depends_on: [extract]
+    depends_on: [style, extract]
     messages:
       - role: system
-        content: "You are a formatter."
+        content: "You are a formatter. Keep the answer compact and deterministic."
       - role: user
-        content: "Format these points as a numbered list: {extract.output}"
+        content: "Format these points as a numbered list using this style guide: {style.output}. Points: {extract.output}"
   - step_id: translate
     step_type: llm_call
     model: fake
     depends_on: [format]
     messages:
       - role: system
-        content: "You translate to Spanish."
+        content: "You translate to Spanish. Keep the answer compact and deterministic."
       - role: user
         content: "Translate: {format.output}"
   - step_id: title
@@ -35,7 +43,6 @@ steps:
     depends_on: [translate]
     messages:
       - role: system
-        content: "You write titles."
+        content: "You write titles. Keep the answer compact and deterministic."
       - role: user
         content: "Write a title for: {translate.output}"
-

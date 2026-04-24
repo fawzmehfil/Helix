@@ -48,6 +48,5 @@ class BenchmarkCollector:
             steps_graph_reused=sum(1 for step in self.steps if step.graph_reuse),
             steps_skipped=sum(1 for step in self.steps if step.decision == ExecutionDecisionType.SKIP),
             per_step=list(self.steps),
-            timestamp=dt.datetime.utcnow(),
+            timestamp=dt.datetime.now(dt.UTC),
         )
-

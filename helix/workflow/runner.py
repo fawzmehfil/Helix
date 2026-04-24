@@ -8,13 +8,13 @@ import time
 import uuid
 from copy import deepcopy
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from helix.api_clients.protocols import LLMClient, ToolClient
 from helix.benchmark_engine.collector import BenchmarkCollector
 from helix.config import HelixConfig
 from helix.execution_optimizer.optimizer import ExecutionOptimizer
-from helix.execution_optimizer.types import ExecutionDecisionType
+from helix.execution_optimizer.types import ExecutionDecision, ExecutionDecisionType, OptimizationPlan
 from helix.workflow.types import RunResult, StepResult, Workflow, WorkflowStepType
 
 
@@ -46,11 +46,22 @@ class WorkflowRunner:
 
         return re.sub(r"\{([A-Za-z0-9_.-]+)\}", repl, text)
 
+    def _resolve_value(self, value: Any, inputs: dict[str, str], outputs: dict[str, dict]) -> Any:
+        if isinstance(value, str):
+            return self._resolve_text(value, inputs, outputs)
+        if isinstance(value, list):
+            return [self._resolve_value(item, inputs, outputs) for item in value]
+        if isinstance(value, dict):
+            return {key: self._resolve_value(item, inputs, outputs) for key, item in value.items()}
+        return value
+
     def _resolve_workflow(self, workflow: Workflow, inputs: dict[str, str], outputs: dict[str, dict]) -> Workflow:
         resolved = deepcopy(workflow)
         for step in resolved.steps:
             for message in step.messages:
                 message["content"] = self._resolve_text(str(message.get("content", "")), inputs, outputs)
+            if step.tool_args is not None:
+                step.tool_args = self._resolve_value(step.tool_args, inputs, outputs)
         return resolved
 
     def _log_run(self, result: RunResult) -> None:
@@ -68,6 +79,12 @@ class WorkflowRunner:
                     "input_tokens": step.input_tokens,
                     "output_tokens": step.output_tokens,
                     "latency_ms": step.latency_ms,
+                    "kv_prefix_overlap_tokens": step.kv_estimate.prefix_overlap_tokens
+                    if step.kv_estimate
+                    else 0,
+                    "kv_reused_fraction": step.kv_estimate.reused_fraction
+                    if step.kv_estimate
+                    else 0.0,
                 }
                 for step in result.step_results
             ],
@@ -84,7 +101,9 @@ class WorkflowRunner:
         run_id = run_id or str(uuid.uuid4())
         outputs: dict[str, dict] = {}
         step_results: list[StepResult] = []
-        plan = None
+        decisions: list[ExecutionDecision] = []
+        estimated_time_saved_ms = 0.0
+        estimated_cost_saved_usd = 0.0
         if self.baseline_mode:
             for index, step in enumerate(workflow.steps):
                 resolved = self._resolve_workflow(workflow, inputs, outputs)
@@ -93,6 +112,9 @@ class WorkflowRunner:
                 partial.steps = [resolved.steps[index]]
                 step_plan = self.optimizer.plan(partial, run_id)
                 decision = step_plan.decisions[0]
+                decisions.append(decision)
+                estimated_time_saved_ms += step_plan.estimated_total_time_saved_ms
+                estimated_cost_saved_usd += step_plan.estimated_total_cost_saved_usd
                 started = time.perf_counter()
                 if current.step_type == WorkflowStepType.TOOL_CALL:
                     tool_response = self.tool_client.call(current.tool_name or "echo", current.tool_args or {})
@@ -110,8 +132,11 @@ class WorkflowRunner:
                 resolved = self._resolve_workflow(workflow, inputs, outputs)
                 partial = deepcopy(resolved)
                 partial.steps = [resolved.steps[index]]
-                plan = self.optimizer.plan(partial, run_id)
-                decision = plan.decisions[0]
+                step_plan = self.optimizer.plan(partial, run_id)
+                decision = step_plan.decisions[0]
+                decisions.append(decision)
+                estimated_time_saved_ms += step_plan.estimated_total_time_saved_ms
+                estimated_cost_saved_usd += step_plan.estimated_total_cost_saved_usd
                 current = partial.steps[0]
                 if decision.decision == ExecutionDecisionType.CACHE_HIT and decision.cache_entry:
                     response = decision.cache_entry.response
@@ -142,6 +167,13 @@ class WorkflowRunner:
                 outputs[current.step_id] = response
                 step_results.append(result)
                 self.benchmark_collector.record_step(result)
+        plan = OptimizationPlan(
+            run_id,
+            workflow.workflow_id,
+            decisions,
+            estimated_time_saved_ms,
+            estimated_cost_saved_usd,
+        )
         result = RunResult(
             run_id=run_id,
             workflow_id=workflow.workflow_id,

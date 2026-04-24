@@ -35,10 +35,14 @@ class CacheStore:
             input_tokens=row[4],
             output_tokens=row[5],
             latency_ms=row[6],
-            created_at=dt.datetime.fromisoformat(row[7]),
-            expires_at=dt.datetime.fromisoformat(row[8]) if row[8] else None,
+            created_at=self._parse_datetime(row[7]),
+            expires_at=self._parse_datetime(row[8]) if row[8] else None,
             hit_count=row[9],
         )
+
+    def _parse_datetime(self, value: str) -> dt.datetime:
+        parsed = dt.datetime.fromisoformat(value)
+        return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=dt.UTC)
 
     def get(self, key: CacheKey) -> Optional[CacheEntry]:
         """Return entry if present and not expired. Increment hit_count."""
@@ -55,7 +59,7 @@ class CacheStore:
                 self._miss_count += 1
                 return None
             entry = self._row_to_entry(row)
-            if entry.expires_at and entry.expires_at <= dt.datetime.utcnow():
+            if entry.expires_at and entry.expires_at <= dt.datetime.now(dt.UTC):
                 conn.execute("DELETE FROM cache_entries WHERE key=?", (key.key,))
                 self._miss_count += 1
                 return None
@@ -134,4 +138,3 @@ class CacheStore:
                 "SELECT COUNT(*), COALESCE(SUM(hit_count),0) FROM cache_entries"
             ).fetchone()
         return {"total_entries": int(total), "hit_count": int(hits), "miss_count": self._miss_count}
-

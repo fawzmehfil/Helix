@@ -44,14 +44,14 @@ class ExecutionOptimizer:
         self.model_id = model_id
         self.optimizations_enabled = optimizations_enabled
         self._snapshots: dict[str, tuple["ContextSnapshot", CacheKey, str]] = {}
+        self._previous_snapshot_by_run: dict[str, "ContextSnapshot"] = {}
 
     def plan(self, workflow: "Workflow", run_id: str) -> OptimizationPlan:
         """For each step in workflow, produce an ExecutionDecision."""
         decisions: list[ExecutionDecision] = []
-        prev_snapshot = None
+        prev_snapshot = self._previous_snapshot_by_run.get(run_id)
         total_time = 0.0
         total_cost = 0.0
-        self._snapshots = {}
         for step in workflow.steps:
             model = step.model or workflow.default_model or self.model_id
             snapshot = self.decomposer.decompose_messages(step.messages, step.step_id, run_id)
@@ -59,22 +59,48 @@ class ExecutionOptimizer:
             self._snapshots[step.step_id] = (snapshot, key, model)
             if not self.optimizations_enabled or not step.cacheable:
                 kv = self.kv_simulator.estimate(prev_snapshot, snapshot, model)
-                decision = ExecutionDecision(step.step_id, ExecutionDecisionType.EXECUTE, kv_estimate=kv, reason="optimizations disabled")
+                reason = "step is not cacheable" if not step.cacheable else "optimizations disabled"
+                decision = ExecutionDecision(
+                    step.step_id,
+                    ExecutionDecisionType.EXECUTE,
+                    kv_estimate=kv,
+                    cache_key=key.key,
+                    reason=reason,
+                )
             else:
                 entry = self.cache_store.get(key)
                 if entry is not None:
-                    decision = ExecutionDecision(step.step_id, ExecutionDecisionType.CACHE_HIT, cache_entry=entry, reason="cache key matched")
+                    decision = ExecutionDecision(
+                        step.step_id,
+                        ExecutionDecisionType.CACHE_HIT,
+                        cache_entry=entry,
+                        cache_key=key.key,
+                        reason="resolved context and model matched cache key",
+                    )
                 else:
                     node = self.graph_reuser.find_reusable_node(snapshot, model)
                     if node is not None:
-                        decision = ExecutionDecision(step.step_id, ExecutionDecisionType.GRAPH_REUSE, graph_node=node, reason="graph input hash matched")
+                        decision = ExecutionDecision(
+                            step.step_id,
+                            ExecutionDecisionType.GRAPH_REUSE,
+                            graph_node=node,
+                            cache_key=key.key,
+                            reason="resolved context hash matched computation graph",
+                        )
                     else:
                         kv = self.kv_simulator.estimate(prev_snapshot, snapshot, model)
                         total_time += kv.estimated_time_saved_ms
                         total_cost += kv.estimated_cost_saved_usd
-                        decision = ExecutionDecision(step.step_id, ExecutionDecisionType.EXECUTE, kv_estimate=kv, reason="no cache or graph match")
+                        decision = ExecutionDecision(
+                            step.step_id,
+                            ExecutionDecisionType.EXECUTE,
+                            kv_estimate=kv,
+                            cache_key=key.key,
+                            reason="no cache or graph match for resolved context",
+                        )
             decisions.append(decision)
             prev_snapshot = snapshot
+            self._previous_snapshot_by_run[run_id] = snapshot
         return OptimizationPlan(run_id, workflow.workflow_id, decisions, total_time, total_cost)
 
     def record_execution(
@@ -100,9 +126,9 @@ class ExecutionOptimizer:
                 output_tokens=entry.output_tokens,
                 latency_ms=0.0,
                 model_id=model,
-                created_at=dt.datetime.utcnow(),
+                created_at=dt.datetime.now(dt.UTC),
             )
-        now = dt.datetime.utcnow()
+        now = dt.datetime.now(dt.UTC)
         entry = CacheEntry(
             key=key.key,
             step_id=decision.step_id,

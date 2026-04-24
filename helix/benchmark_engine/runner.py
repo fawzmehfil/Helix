@@ -56,39 +56,30 @@ class BenchmarkRunner:
         cost_saved = baseline.estimated_cost_usd - optimized.estimated_cost_usd
         tokens_saved = baseline.total_tokens - optimized.total_tokens
         steps_reduced = baseline.steps_executed - optimized.steps_executed
-        context = (
-            sum(
-                base.input_tokens + base.output_tokens
-                for base, opt in zip(baseline.per_step, optimized.per_step)
-                if opt.cache_hit
-            )
-            / baseline.total_tokens
-            * 100.0
-            if baseline.total_tokens
-            else 0.0
+        context_tokens = sum(
+            base.input_tokens + base.output_tokens
+            for base, opt in zip(baseline.per_step, optimized.per_step)
+            if opt.cache_hit
         )
-        graph = (
-            sum(
-                base.input_tokens + base.output_tokens
-                for base, opt in zip(baseline.per_step, optimized.per_step)
-                if opt.graph_reuse
-            )
-            / baseline.total_tokens
-            * 100.0
-            if baseline.total_tokens
-            else 0.0
+        graph_tokens = sum(
+            base.input_tokens + base.output_tokens
+            for base, opt in zip(baseline.per_step, optimized.per_step)
+            if opt.graph_reuse
         )
-        kv = (
-            sum(
-                (step.kv_estimate.estimated_cost_saved_usd if step.kv_estimate else 0.0)
-                for step in optimized.per_step
-                if step.decision == ExecutionDecisionType.EXECUTE
-            )
-            / baseline.estimated_cost_usd
-            * 100.0
-            if baseline.estimated_cost_usd
-            else 0.0
+        kv_tokens = sum(
+            step.kv_estimate.prefix_overlap_tokens if step.kv_estimate else 0
+            for step in optimized.per_step
+            if step.decision == ExecutionDecisionType.EXECUTE
         )
+        context = context_tokens / baseline.total_tokens * 100.0 if baseline.total_tokens else 0.0
+        graph = graph_tokens / baseline.total_tokens * 100.0 if baseline.total_tokens else 0.0
+        kv = kv_tokens / baseline.total_tokens * 100.0 if baseline.total_tokens else 0.0
+        reusable_total = context + graph + kv
+        if reusable_total > 100.0:
+            scale = 100.0 / reusable_total
+            context *= scale
+            graph *= scale
+            kv *= scale
         if tokens_saved <= 0 and steps_reduced <= 0 and latency_saved <= 0:
             step_reduction = 0.0
         else:
@@ -115,4 +106,3 @@ class BenchmarkRunner:
         if workflow.default_model == "fake" or all(step.model == "fake" for step in workflow.steps):
             assert optimized.steps_executed == 0, "FakeLLMClient same-input optimized run must execute 0 steps"
         return report
-

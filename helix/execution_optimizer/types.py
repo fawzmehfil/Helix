@@ -29,6 +29,7 @@ class ExecutionDecision:
     cache_entry: Optional[CacheEntry] = None
     graph_node: Optional[GraphNode] = None
     kv_estimate: Optional[KVReuseEstimate] = None
+    cache_key: Optional[str] = None
     reason: str = ""
 
 
@@ -41,4 +42,3 @@ class OptimizationPlan:
     decisions: list[ExecutionDecision]
     estimated_total_time_saved_ms: float
     estimated_total_cost_saved_usd: float
-

@@ -1,0 +1,29 @@
+workflow_id: demo_kv_overlap_v1
+name: "KV Prefix Overlap Demo"
+description: "Shared system prompt with changing user prompts to demonstrate KV prefix overlap."
+default_model: fake
+steps:
+  - step_id: summarize_alpha
+    step_type: llm_call
+    model: fake
+    messages:
+      - role: system
+        content: "You are Helix's deterministic benchmark assistant. Preserve this shared system prefix for KV reuse measurement."
+      - role: user
+        content: "Summarize the benefits of local-first cache instrumentation."
+  - step_id: summarize_beta
+    step_type: llm_call
+    model: fake
+    messages:
+      - role: system
+        content: "You are Helix's deterministic benchmark assistant. Preserve this shared system prefix for KV reuse measurement."
+      - role: user
+        content: "Summarize the benefits of graph-based computation reuse."
+  - step_id: summarize_gamma
+    step_type: llm_call
+    model: fake
+    messages:
+      - role: system
+        content: "You are Helix's deterministic benchmark assistant. Preserve this shared system prefix for KV reuse measurement."
+      - role: user
+        content: "Summarize the benefits of KV prefix overlap estimation."
