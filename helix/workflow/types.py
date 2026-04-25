@@ -40,6 +40,7 @@ class WorkflowStep:
     semantic_reuse: bool = False
     semantic_threshold: float = 0.92
     required_fields: list[str] = field(default_factory=list)
+    output_schema: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -87,6 +88,7 @@ class StepResult:
     repair_attempted: bool = False
     repair_successful: bool = False
     structured_output_failed: bool = False
+    schema_validation_failed: bool = False
     semantic_cache_hit: bool = False
     semantic_reuse_applied: bool = False
     similarity_score: float = 0.0

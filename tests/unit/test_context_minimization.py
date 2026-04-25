@@ -74,6 +74,16 @@ steps:
         content: "Extract fields."
       - role: user
         content: "Extract {document}"
+  - step_id: d
+    step_type: llm_call
+    model: fake
+    depends_on: [s]
+    input_projection:
+      s:
+        fields: ["doc_type"]
+    messages:
+      - role: user
+        content: "Use {s.output.doc_type}"
 """
     )
     runner = build_runner("fake", baseline=False)
@@ -135,6 +145,16 @@ steps:
         content: "Extract."
       - role: user
         content: "Use this very long document field: {document}"
+  - step_id: d
+    step_type: llm_call
+    model: fake
+    depends_on: [s]
+    input_projection:
+      s:
+        fields: ["doc_type"]
+    messages:
+      - role: user
+        content: "Use {s.output.doc_type}"
 """
     )
     runner = build_runner("fake", baseline=False)
@@ -148,6 +168,40 @@ steps:
     assert step.optimization_overhead_tokens > 0
     assert step.net_tokens_saved_by_minimization == step.raw_input_tokens - step.minimized_input_tokens
     assert step.tokens_removed_by_projection == max(step.raw_input_tokens - step.projected_input_tokens, 0)
+
+
+def test_raw_resolution_counts_field_reference_as_unoptimized_full_output():
+    workflow = WorkflowParser().parse_yaml(
+        """
+workflow_id: raw_field_test
+name: Raw Field Test
+steps:
+  - step_id: s
+    step_type: llm_call
+    model: fake
+    messages:
+      - role: user
+        content: "Extract"
+  - step_id: d
+    step_type: llm_call
+    model: fake
+    depends_on: [s]
+    input_projection:
+      s:
+        fields: ["a"]
+    messages:
+      - role: user
+        content: "Use {s.output.a}"
+"""
+    )
+    outputs = {"s": {"content": '{"a":"keep","b":"large unused text remains in raw"}'}}
+    runner = build_runner("fake", baseline=False)
+
+    raw = runner._resolve_workflow(workflow, {}, outputs, apply_field_slicing=False)
+    projected = runner._resolve_workflow(workflow, {}, outputs, use_projection=True)
+
+    assert "large unused" in raw.steps[1].messages[0]["content"]
+    assert projected.steps[1].messages[0]["content"] == "Use keep"
 
 
 def test_template_field_slicing_injects_only_selected_nested_field():

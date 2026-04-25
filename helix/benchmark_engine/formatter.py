@@ -140,6 +140,12 @@ class ReportFormatter:
         console.print(f"Optimized:  {report.optimized.calls}")
         console.print(f"Avoided:    {report.calls_avoided}")
         console.print()
+        console.print("Call-level savings:")
+        console.print(f"Calls avoided:             {report.calls_avoided}")
+        console.print(f"Tokens avoided by skips:   {report.tokens_avoided}")
+        console.print(f"Semantic calls avoided:    {report.semantic_calls_avoided}")
+        console.print(f"Semantic tokens avoided:   {report.semantic_tokens_avoided}")
+        console.print()
         console.print("Context minimization:")
         console.print(f"Raw input tokens:        {report.optimized.raw_input_tokens}")
         console.print(f"Projected input tokens:  {report.optimized.projected_input_tokens}")
@@ -165,6 +171,7 @@ class ReportFormatter:
         exact_cache_hits = report.optimized.steps_cached - report.optimized.semantic_cache_hits
         console.print(f"Exact cache hits:          {exact_cache_hits}")
         console.print(f"Semantic cache hits:       {report.optimized.semantic_cache_hits}")
+        console.print(f"Semantic tokens avoided:   {report.semantic_tokens_avoided}")
         console.print(f"Avg similarity score:      {report.optimized.avg_similarity_score:.3f}")
         console.print(f"Graph reuse:               {report.optimized.steps_graph_reused}")
         console.print(f"Steps eliminated:          {report.steps_eliminated}")
@@ -172,6 +179,7 @@ class ReportFormatter:
         console.print()
         console.print("Structured output:")
         console.print(f"Repair attempts:           {report.optimized.repair_attempts}")
+        console.print(f"Schema failures:           {report.optimized.schema_validation_failures}")
         success_rate = (
             report.optimized.repair_successes / report.optimized.repair_attempts * 100.0
             if report.optimized.repair_attempts

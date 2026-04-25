@@ -40,6 +40,7 @@ class WorkflowParser:
                 semantic_reuse=bool(item.get("semantic_reuse", False)),
                 semantic_threshold=float(item.get("semantic_threshold", 0.92)),
                 required_fields=list(item.get("required_fields", [])),
+                output_schema=dict(item.get("output_schema", {})),
             )
             for item in data.get("steps", [])
         ]

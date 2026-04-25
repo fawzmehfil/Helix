@@ -16,6 +16,7 @@ from helix.benchmark_engine.collector import BenchmarkCollector
 from helix.config import HelixConfig
 from helix.execution_optimizer.optimizer import ExecutionOptimizer
 from helix.execution_optimizer.types import ExecutionDecision, ExecutionDecisionType, OptimizationPlan
+from helix.tokenization import TokenCounter
 from helix.workflow.types import RunResult, StepResult, Workflow, WorkflowStepType
 
 
@@ -36,10 +37,10 @@ class WorkflowRunner:
         self.tool_client = tool_client
         self.benchmark_collector = benchmark_collector
         self.baseline_mode = baseline_mode
+        self.token_counter = TokenCounter(getattr(llm_client, "model_id", "fake"))
 
     def _estimate_tokens(self, messages: list[dict]) -> int:
-        total_words = sum(len(str(message.get("content", "")).split()) for message in messages)
-        return round(total_words * 1.3)
+        return self.token_counter.count_messages(messages)
 
     def _compact_json(self, value: Any) -> str:
         return json.dumps(value, separators=(",", ":"), sort_keys=True)
@@ -95,6 +96,7 @@ class WorkflowRunner:
         inputs: dict[str, str],
         outputs: dict[str, dict],
         projection: dict[str, dict[str, Any]] | None = None,
+        apply_field_slicing: bool = True,
     ) -> str:
         projection = projection or {}
 
@@ -102,6 +104,8 @@ class WorkflowRunner:
             key = match.group(1)
             if ".output." in key:
                 step_id, field = key.split(".output.", 1)
+                if not apply_field_slicing:
+                    return self._project_response(step_id, outputs.get(step_id, {}), {})
                 content = self._coerce_output_content(outputs.get(step_id, {}))
                 if isinstance(content, dict):
                     value = self._get_path_value(content, field)
@@ -120,23 +124,39 @@ class WorkflowRunner:
         inputs: dict[str, str],
         outputs: dict[str, dict],
         projection: dict[str, dict[str, Any]] | None = None,
+        apply_field_slicing: bool = True,
     ) -> Any:
         if isinstance(value, str):
-            return self._resolve_text(value, inputs, outputs, projection)
+            return self._resolve_text(value, inputs, outputs, projection, apply_field_slicing)
         if isinstance(value, list):
-            return [self._resolve_value(item, inputs, outputs, projection) for item in value]
+            return [
+                self._resolve_value(item, inputs, outputs, projection, apply_field_slicing)
+                for item in value
+            ]
         if isinstance(value, dict):
             return {
-                key: self._resolve_value(item, inputs, outputs, projection)
+                key: self._resolve_value(item, inputs, outputs, projection, apply_field_slicing)
                 for key, item in value.items()
             }
         return value
 
-    def _apply_compact_instructions(self, step) -> None:
+    def _structured_consumers(self, workflow: Workflow) -> set[str]:
+        consumers: set[str] = set()
+        for step in workflow.steps:
+            consumers.update(step.input_projection.keys())
+            for message in step.messages:
+                content = str(message.get("content", ""))
+                for match in re.finditer(r"\{([A-Za-z0-9_.-]+)\}", content):
+                    key = match.group(1)
+                    if ".output." in key:
+                        consumers.add(key.split(".output.", 1)[0])
+        return consumers
+
+    def _apply_compact_instructions(self, step, structured_consumers: set[str]) -> None:
         if not step.compact:
             return
         if step.output_format == "json" and not (
-            step.required_fields or any(spec.get("fields") for spec in step.input_projection.values())
+            step.step_id in structured_consumers and (step.required_fields or step.output_schema)
         ):
             return
         instruction = "Be concise."
@@ -154,8 +174,10 @@ class WorkflowRunner:
         outputs: dict[str, dict],
         use_projection: bool = False,
         apply_compact: bool = False,
+        apply_field_slicing: bool = True,
     ) -> Workflow:
         resolved = deepcopy(workflow)
+        structured_consumers = self._structured_consumers(workflow)
         for step in resolved.steps:
             projection = step.input_projection if use_projection else {}
             for message in step.messages:
@@ -164,11 +186,18 @@ class WorkflowRunner:
                     inputs,
                     outputs,
                     projection,
+                    apply_field_slicing,
                 )
             if step.tool_args is not None:
-                step.tool_args = self._resolve_value(step.tool_args, inputs, outputs, projection)
+                step.tool_args = self._resolve_value(
+                    step.tool_args,
+                    inputs,
+                    outputs,
+                    projection,
+                    apply_field_slicing,
+                )
             if apply_compact:
-                self._apply_compact_instructions(step)
+                self._apply_compact_instructions(step, structured_consumers)
         return resolved
 
     def _minimize_step_context(self, step) -> None:
@@ -242,11 +271,46 @@ class WorkflowRunner:
             return False
         if not isinstance(parsed, dict):
             return False
+        if current.output_schema:
+            return self._validate_json_schema(parsed, current.output_schema)
         return all(field in parsed for field in current.required_fields)
+
+    def _validate_json_schema(self, value: Any, schema: dict[str, Any]) -> bool:
+        schema_type = schema.get("type")
+        if schema_type == "object":
+            if not isinstance(value, dict):
+                return False
+            required = schema.get("required", [])
+            if any(field not in value for field in required):
+                return False
+            properties = schema.get("properties", {})
+            return all(
+                field not in value or self._validate_json_schema(value[field], field_schema)
+                for field, field_schema in properties.items()
+            )
+        if schema_type == "array":
+            if not isinstance(value, list):
+                return False
+            item_schema = schema.get("items")
+            return all(self._validate_json_schema(item, item_schema) for item in value) if item_schema else True
+        if schema_type == "string":
+            return isinstance(value, str)
+        if schema_type == "number":
+            return isinstance(value, int | float) and not isinstance(value, bool)
+        if schema_type == "integer":
+            return isinstance(value, int) and not isinstance(value, bool)
+        if schema_type == "boolean":
+            return isinstance(value, bool)
+        return True
 
     def _repair_structured_response(self, current, response: dict) -> tuple[dict, bool, bool, bool]:
         if current.output_format != "json" or self._validate_structured_response(current, response):
             return response, False, False, False
+        schema = current.output_schema or {
+            "type": "object",
+            "required": current.required_fields,
+            "properties": {field: {"type": "string"} for field in current.required_fields},
+        }
         repair_messages = [
             {
                 "role": "system",
@@ -256,7 +320,7 @@ class WorkflowRunner:
                 "role": "user",
                 "content": self._compact_json(
                     {
-                        "required_fields": current.required_fields,
+                        "schema": schema,
                         "invalid_response": response.get("content", ""),
                     }
                 ),
@@ -296,6 +360,7 @@ class WorkflowRunner:
         projection_messages: list[dict] | None = None,
         tokens_trimmed_by_budget: int = 0,
         budget_applied: bool = False,
+        projection_declared: bool = False,
         repair_attempted: bool = False,
         repair_successful: bool = False,
         structured_output_failed: bool = False,
@@ -311,48 +376,51 @@ class WorkflowRunner:
         tokens_removed_by_projection = max(0, raw_input_tokens - projected_tokens)
         net_tokens_saved = raw_input_tokens - minimized_input_tokens
         warnings = []
-        if minimized_input_tokens > raw_input_tokens:
+        if projection_declared and minimized_input_tokens > raw_input_tokens:
             warnings.append("Context minimization regression: optimized prompt larger than raw prompt")
-        if optimization_overhead_tokens > tokens_removed_by_projection:
+        if projection_declared and projected_tokens >= raw_input_tokens:
+            warnings.append("Projection ineffective: no reduction in context")
+        if projection_declared and optimization_overhead_tokens > tokens_removed_by_projection:
             warnings.append("Optimization overhead exceeded projection savings")
         return StepResult(
-            current.step_id,
-            decision_type,
-            response,
-            input_tokens,
-            output_tokens,
-            latency,
-            kv_estimate,
-            cache_hit,
-            graph_reuse,
-            model,
-            estimate_cost_usd(model, input_tokens, output_tokens),
-            (
+            step_id=current.step_id,
+            decision=decision_type,
+            response=response,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            latency_ms=latency,
+            kv_estimate=kv_estimate,
+            cache_hit=cache_hit,
+            graph_reuse=graph_reuse,
+            model=model,
+            estimated_cost_usd=estimate_cost_usd(model, input_tokens, output_tokens),
+            call_count=(
                 1 + int(repair_attempted)
                 if current.step_type == WorkflowStepType.LLM_CALL
                 and decision_type == ExecutionDecisionType.EXECUTE
                 else 0
             ),
-            raw_input_tokens,
-            projected_tokens,
-            minimized_input_tokens,
-            tokens_removed_by_projection,
-            optimization_overhead_tokens,
-            net_tokens_saved,
-            net_tokens_saved > 0,
-            tokens_trimmed_by_budget,
-            budget_applied,
-            warnings,
-            max(0, raw_input_tokens - minimized_input_tokens),
-            minimized_input_tokens - raw_input_tokens,
-            raw_messages,
-            minimized_messages,
-            repair_attempted,
-            repair_successful,
-            structured_output_failed,
-            semantic_cache_hit,
-            semantic_reuse_applied,
-            similarity_score,
+            raw_input_tokens=raw_input_tokens,
+            projected_input_tokens=projected_tokens,
+            minimized_input_tokens=minimized_input_tokens,
+            tokens_removed_by_projection=tokens_removed_by_projection,
+            optimization_overhead_tokens=optimization_overhead_tokens,
+            net_tokens_saved_by_minimization=net_tokens_saved,
+            minimization_effective=net_tokens_saved > 0,
+            tokens_trimmed_by_budget=tokens_trimmed_by_budget,
+            budget_applied=budget_applied,
+            minimization_warnings=warnings,
+            tokens_saved_by_minimization=max(0, raw_input_tokens - minimized_input_tokens),
+            net_token_change=minimized_input_tokens - raw_input_tokens,
+            raw_messages=raw_messages,
+            minimized_messages=minimized_messages,
+            repair_attempted=repair_attempted,
+            repair_successful=repair_successful,
+            structured_output_failed=structured_output_failed,
+            schema_validation_failed=structured_output_failed,
+            semantic_cache_hit=semantic_cache_hit,
+            semantic_reuse_applied=semantic_reuse_applied,
+            similarity_score=similarity_score,
         )
 
     def _log_run(self, result: RunResult) -> None:
@@ -381,6 +449,7 @@ class WorkflowRunner:
                     "minimization_effective": step.minimization_effective,
                     "repair_attempted": step.repair_attempted,
                     "repair_successful": step.repair_successful,
+                    "schema_validation_failed": step.schema_validation_failed,
                     "semantic_cache_hit": step.semantic_cache_hit,
                     "similarity_score": step.similarity_score,
                     "kv_prefix_overlap_tokens": step.kv_estimate.prefix_overlap_tokens
@@ -411,7 +480,12 @@ class WorkflowRunner:
         estimated_cost_saved_usd = 0.0
         if self.baseline_mode:
             for index, step in enumerate(workflow.steps):
-                resolved = self._resolve_workflow(workflow, inputs, outputs)
+                resolved = self._resolve_workflow(
+                    workflow,
+                    inputs,
+                    outputs,
+                    apply_field_slicing=False,
+                )
                 current = next(s for s in resolved.steps if s.step_id == step.step_id)
                 partial = deepcopy(resolved)
                 partial.steps = [resolved.steps[index]]
@@ -444,6 +518,7 @@ class WorkflowRunner:
                     raw_messages,
                     raw_messages,
                     raw_messages,
+                    False,
                     repair_attempted,
                     repair_successful,
                     structured_failed,
@@ -452,8 +527,13 @@ class WorkflowRunner:
                 step_results.append(result)
                 self.benchmark_collector.record_step(result)
         else:
-            for index, original_step in enumerate(workflow.steps):
-                raw_resolved = self._resolve_workflow(workflow, inputs, outputs)
+            for index, _original_step in enumerate(workflow.steps):
+                raw_resolved = self._resolve_workflow(
+                    workflow,
+                    inputs,
+                    outputs,
+                    apply_field_slicing=False,
+                )
                 raw_current = raw_resolved.steps[index]
                 projected_resolved = self._resolve_workflow(
                     workflow,
@@ -506,6 +586,7 @@ class WorkflowRunner:
                         projection_messages,
                         tokens_trimmed_by_budget,
                         budget_applied,
+                        bool(current.input_projection),
                     )
                     outputs[current.step_id] = response
                     step_results.append(result)
@@ -559,6 +640,7 @@ class WorkflowRunner:
                     projection_messages,
                     tokens_trimmed_by_budget,
                     budget_applied,
+                    bool(current.input_projection),
                     repair_attempted,
                     repair_successful,
                     structured_failed,

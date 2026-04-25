@@ -41,6 +41,7 @@ class BenchmarkResult:
     avg_similarity_score: float
     repair_attempts: int
     repair_successes: int
+    schema_validation_failures: int
     per_step: list[StepResult]
     timestamp: dt.datetime
 
@@ -66,6 +67,8 @@ class AttributionReport:
     kv_simulation_pct: float
     graph_reuse_pct: float
     step_reduction_pct: float
+    semantic_calls_avoided: int = 0
+    semantic_tokens_avoided: int = 0
     warnings: list[str] = field(default_factory=list)
 
     def validate(self) -> None:

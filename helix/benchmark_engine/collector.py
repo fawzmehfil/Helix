@@ -84,6 +84,7 @@ class BenchmarkCollector:
             ),
             repair_attempts=sum(1 for step in self.steps if step.repair_attempted),
             repair_successes=sum(1 for step in self.steps if step.repair_successful),
+            schema_validation_failures=sum(1 for step in self.steps if step.schema_validation_failed),
             per_step=list(self.steps),
             timestamp=dt.datetime.now(dt.UTC),
         )

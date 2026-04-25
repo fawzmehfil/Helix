@@ -17,12 +17,21 @@ steps:
     compact: true
     output_format: json
     required_fields: ["doc_type", "region"]
+    output_schema:
+      type: object
+      properties:
+        doc_type: {type: string}
+        region: {type: string}
+        priority: {type: string}
+        owner: {type: string}
+        irrelevant_notes: {type: string}
+      required: ["doc_type", "region", "priority", "owner", "irrelevant_notes"]
     max_output_tokens: 60
     messages:
       - role: system
         content: "Extract document metadata."
       - role: user
-        content: "Return doc_type and region for doc_type={doc_type}, region={region}."
+        content: "Return JSON doc_type, region, priority, owner, and irrelevant_notes for doc_type={doc_type}, region={region}."
   - step_id: classify_document
     step_type: llm_call
     depends_on: [extract_metadata]
@@ -32,23 +41,40 @@ steps:
     compact: true
     output_format: json
     required_fields: ["category", "confidence"]
+    output_schema:
+      type: object
+      properties:
+        category: {type: string}
+        confidence: {type: number}
+        routing_explanation: {type: string}
+      required: ["category", "confidence", "routing_explanation"]
     max_output_tokens: 60
     messages:
       - role: system
         content: "Classify a business document."
       - role: user
-        content: "Classify this metadata: {extract_metadata.output}"
+        content: "Return JSON category and confidence for doc_type={extract_metadata.output.doc_type}; region={extract_metadata.output.region}."
   - step_id: extract_line_items
     step_type: llm_call
     compact: true
     output_format: json
     required_fields: ["items", "due_days"]
+    output_schema:
+      type: object
+      properties:
+        items:
+          type: array
+          items: {type: string}
+        due_days: {type: integer}
+        changed_section: {type: string}
+        audit_notes: {type: string}
+      required: ["items", "due_days", "changed_section", "audit_notes"]
     max_output_tokens: 80
     messages:
       - role: system
         content: "Extract changed line-item facts."
       - role: user
-        content: "Return items and due_days from: {body}"
+        content: "Return JSON items, due_days, changed_section, and audit_notes from: {body}"
   - step_id: qc_static_fields
     step_type: llm_call
     depends_on: [extract_metadata, classify_document]
@@ -60,12 +86,18 @@ steps:
     compact: true
     output_format: json
     required_fields: ["valid", "reason"]
+    output_schema:
+      type: object
+      properties:
+        valid: {type: boolean}
+        reason: {type: string}
+      required: ["valid", "reason"]
     max_output_tokens: 60
     messages:
       - role: system
         content: "Validate stable routing fields."
       - role: user
-        content: "Validate metadata={extract_metadata.output}; classification={classify_document.output}"
+        content: "Return JSON valid and reason for doc_type={extract_metadata.output.doc_type}; region={extract_metadata.output.region}; category={classify_document.output.category}; confidence={classify_document.output.confidence}."
   - step_id: summarize_change
     step_type: llm_call
     depends_on: [extract_line_items]
@@ -75,9 +107,14 @@ steps:
     compact: true
     output_format: json
     required_fields: ["summary"]
+    output_schema:
+      type: object
+      properties:
+        summary: {type: string}
+      required: ["summary"]
     max_output_tokens: 60
     messages:
       - role: system
         content: "Summarize invoice processing changes."
       - role: user
-        content: "Summarize only these changed facts: {extract_line_items.output}"
+        content: "Return JSON summary for items={extract_line_items.output.items}; due_days={extract_line_items.output.due_days}."

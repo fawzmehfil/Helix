@@ -71,7 +71,11 @@ class BenchmarkRunner:
                 f"{optimized.tokens_removed_by_projection} removed)"
             )
         warnings.extend(optimized.minimization_warnings)
-        return warnings
+        deduped: list[str] = []
+        for warning in warnings:
+            if warning not in deduped:
+                deduped.append(warning)
+        return deduped
 
     def run_comparison(self, workflow: Workflow, inputs: dict[str, str]) -> AttributionReport:
         """Run baseline, run optimized, and produce an AttributionReport."""
@@ -100,10 +104,23 @@ class BenchmarkRunner:
             for base, opt in zip(baseline.per_step, optimized.per_step)
             if opt.graph_reuse
         )
+        semantic_tokens = sum(
+            base.input_tokens + base.output_tokens
+            for base, opt in zip(baseline.per_step, optimized.per_step)
+            if opt.semantic_cache_hit
+        )
+        semantic_calls = sum(
+            1 for opt in optimized.per_step if opt.semantic_cache_hit
+        )
         kv_tokens = sum(
             step.kv_estimate.prefix_overlap_tokens if step.kv_estimate else 0
             for step in optimized.per_step
             if step.decision == ExecutionDecisionType.EXECUTE
+        )
+        skipped_tokens = sum(
+            base.input_tokens + base.output_tokens
+            for base, opt in zip(baseline.per_step, optimized.per_step)
+            if opt.decision != ExecutionDecisionType.EXECUTE
         )
         context = context_tokens / baseline.total_tokens * 100.0 if baseline.total_tokens else 0.0
         graph = graph_tokens / baseline.total_tokens * 100.0 if baseline.total_tokens else 0.0
@@ -132,13 +149,15 @@ class BenchmarkRunner:
             tokens_saved_pct=self._pct(tokens_saved, baseline.total_tokens),
             steps_reduced=steps_reduced,
             calls_avoided=baseline.calls - optimized.calls,
-            tokens_avoided=tokens_saved,
+            tokens_avoided=skipped_tokens,
             steps_eliminated=optimized.steps_skipped,
             partial_recomputation_steps=optimized.steps_cached + optimized.steps_graph_reused,
             context_reuse_pct=context,
             kv_simulation_pct=kv,
             graph_reuse_pct=graph,
             step_reduction_pct=step_reduction,
+            semantic_calls_avoided=semantic_calls,
+            semantic_tokens_avoided=semantic_tokens,
             warnings=self._regression_warnings(baseline, optimized),
         )
         report.validate()
@@ -192,6 +211,19 @@ class BenchmarkRunner:
             for base, opt in zip(baseline.per_step, optimized.per_step)
             if opt.graph_reuse
         )
+        skipped_tokens = sum(
+            base.input_tokens + base.output_tokens
+            for base, opt in zip(baseline.per_step, optimized.per_step)
+            if opt.decision != ExecutionDecisionType.EXECUTE
+        )
+        semantic_tokens = sum(
+            base.input_tokens + base.output_tokens
+            for base, opt in zip(baseline.per_step, optimized.per_step)
+            if opt.semantic_cache_hit
+        )
+        semantic_calls = sum(
+            1 for opt in optimized.per_step if opt.semantic_cache_hit
+        )
         if tokens_saved <= 0 or cost_saved < 0 or latency_saved <= 0:
             context = 0.0
             graph_pct = 0.0
@@ -212,13 +244,15 @@ class BenchmarkRunner:
             tokens_saved_pct=self._pct(tokens_saved, baseline.total_tokens),
             steps_reduced=steps_reduced,
             calls_avoided=calls_avoided,
-            tokens_avoided=tokens_saved,
+            tokens_avoided=skipped_tokens,
             steps_eliminated=steps_eliminated,
             partial_recomputation_steps=partial_recomputation,
             context_reuse_pct=context,
             kv_simulation_pct=0.0,
             graph_reuse_pct=graph_pct,
             step_reduction_pct=step_reduction,
+            semantic_calls_avoided=semantic_calls,
+            semantic_tokens_avoided=semantic_tokens,
             warnings=self._regression_warnings(baseline, optimized),
         )
         report.validate()

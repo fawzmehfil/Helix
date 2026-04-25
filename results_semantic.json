@@ -1,0 +1,167 @@
+{
+  "workflow_id": "demo_semantic_reuse_v1",
+  "backend": "openai",
+  "model": "gpt-4o-mini",
+  "timestamp": "2026-04-25T18:27:53.875817+00:00",
+  "baseline": {
+    "run_id": "791903a1-fdbe-4cb0-b222-26a72e77eab0",
+    "workflow_id": "demo_semantic_reuse_v1",
+    "mode": "baseline",
+    "total_latency_ms": 1056.9146249999903,
+    "total_input_tokens": 29,
+    "total_output_tokens": 29,
+    "total_tokens": 58,
+    "estimated_cost_usd": 2.175e-05,
+    "calls": 1,
+    "steps_executed": 1,
+    "steps_cached": 0,
+    "steps_graph_reused": 0,
+    "steps_skipped": 0,
+    "context_minimization": {
+      "raw_input_tokens": 29,
+      "projected_input_tokens": 29,
+      "minimized_input_tokens": 29,
+      "tokens_removed_by_projection": 0,
+      "optimization_overhead_tokens": 0,
+      "net_tokens_saved_by_minimization": 0,
+      "minimization_effective": false,
+      "tokens_trimmed_by_budget": 0,
+      "budget_applied_steps": 0,
+      "warnings": []
+    },
+    "semantic_reuse": {
+      "semantic_cache_hits": 0,
+      "avg_similarity_score": 0.0
+    },
+    "structured_output": {
+      "repair_attempts": 0,
+      "repair_successes": 0,
+      "schema_validation_failures": 0
+    },
+    "per_step": [
+      {
+        "step_id": "summarize_invoice",
+        "decision": "execute",
+        "input_tokens": 29,
+        "output_tokens": 29,
+        "total_tokens": 58,
+        "raw_input_tokens": 29,
+        "projected_input_tokens": 29,
+        "minimized_input_tokens": 29,
+        "tokens_removed_by_projection": 0,
+        "optimization_overhead_tokens": 0,
+        "net_tokens_saved_by_minimization": 0,
+        "minimization_effective": false,
+        "tokens_trimmed_by_budget": false,
+        "budget_applied": false,
+        "minimization_warnings": [],
+        "cache_hit": false,
+        "semantic_cache_hit": false,
+        "semantic_reuse_applied": false,
+        "similarity_score": 0.0,
+        "graph_reuse": false,
+        "latency_ms": 1056.9146249999903,
+        "cost_usd": 2.175e-05,
+        "model": "gpt-4o-mini",
+        "call_count": 1,
+        "repair_attempted": false,
+        "repair_successful": false,
+        "schema_validation_failed": false,
+        "structured_output_failed": false
+      }
+    ]
+  },
+  "optimized": {
+    "run_id": "5d899cf1-eb5e-439d-9d8c-0e4609745ddc",
+    "workflow_id": "demo_semantic_reuse_v1",
+    "mode": "optimized",
+    "total_latency_ms": 0.0,
+    "total_input_tokens": 0,
+    "total_output_tokens": 0,
+    "total_tokens": 0,
+    "estimated_cost_usd": 0.0,
+    "calls": 0,
+    "steps_executed": 0,
+    "steps_cached": 1,
+    "steps_graph_reused": 0,
+    "steps_skipped": 0,
+    "context_minimization": {
+      "raw_input_tokens": 29,
+      "projected_input_tokens": 29,
+      "minimized_input_tokens": 32,
+      "tokens_removed_by_projection": 0,
+      "optimization_overhead_tokens": 3,
+      "net_tokens_saved_by_minimization": -3,
+      "minimization_effective": false,
+      "tokens_trimmed_by_budget": 0,
+      "budget_applied_steps": 0,
+      "warnings": []
+    },
+    "semantic_reuse": {
+      "semantic_cache_hits": 1,
+      "avg_similarity_score": 0.9999999999999999
+    },
+    "structured_output": {
+      "repair_attempts": 0,
+      "repair_successes": 0,
+      "schema_validation_failures": 0
+    },
+    "per_step": [
+      {
+        "step_id": "summarize_invoice",
+        "decision": "cache_hit",
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "raw_input_tokens": 29,
+        "projected_input_tokens": 29,
+        "minimized_input_tokens": 32,
+        "tokens_removed_by_projection": 0,
+        "optimization_overhead_tokens": 3,
+        "net_tokens_saved_by_minimization": -3,
+        "minimization_effective": false,
+        "tokens_trimmed_by_budget": 0,
+        "budget_applied": false,
+        "minimization_warnings": [],
+        "cache_hit": true,
+        "semantic_cache_hit": true,
+        "semantic_reuse_applied": true,
+        "similarity_score": 0.9999999999999999,
+        "graph_reuse": false,
+        "latency_ms": 0.0,
+        "cost_usd": 0.0,
+        "model": "gpt-4o-mini",
+        "call_count": 0,
+        "repair_attempted": false,
+        "repair_successful": false,
+        "schema_validation_failed": false,
+        "structured_output_failed": false
+      }
+    ]
+  },
+  "context_minimization": {
+    "raw_input_tokens": 29,
+    "projected_input_tokens": 29,
+    "minimized_input_tokens": 32,
+    "tokens_removed_by_projection": 0,
+    "optimization_overhead_tokens": 3,
+    "net_tokens_saved_by_minimization": -3,
+    "minimization_effective": false,
+    "tokens_trimmed_by_budget": 0,
+    "warnings": []
+  },
+  "semantic_reuse": {
+    "semantic_cache_hits": 1,
+    "avg_similarity_score": 0.9999999999999999,
+    "semantic_calls_avoided": 1,
+    "semantic_tokens_avoided": 58
+  },
+  "structured_output": {
+    "repair_attempts": 0,
+    "repair_successes": 0,
+    "schema_validation_failures": 0
+  },
+  "warnings": [
+    "minimization overhead exceeded savings (3 overhead vs 0 removed)"
+  ]
+}

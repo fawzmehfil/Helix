@@ -64,6 +64,7 @@ def _step_json(step) -> dict:
         "call_count": step.call_count,
         "repair_attempted": step.repair_attempted,
         "repair_successful": step.repair_successful,
+        "schema_validation_failed": step.schema_validation_failed,
         "structured_output_failed": step.structured_output_failed,
     }
 
@@ -102,6 +103,7 @@ def _result_json(result) -> dict:
         "structured_output": {
             "repair_attempts": result.repair_attempts,
             "repair_successes": result.repair_successes,
+            "schema_validation_failures": result.schema_validation_failures,
         },
         "per_step": [_step_json(step) for step in result.per_step],
     }
@@ -129,10 +131,13 @@ def _write_json_report(path: str, report, backend: str, model: str) -> None:
         "semantic_reuse": {
             "semantic_cache_hits": report.optimized.semantic_cache_hits,
             "avg_similarity_score": report.optimized.avg_similarity_score,
+            "semantic_calls_avoided": report.semantic_calls_avoided,
+            "semantic_tokens_avoided": report.semantic_tokens_avoided,
         },
         "structured_output": {
             "repair_attempts": report.optimized.repair_attempts,
             "repair_successes": report.optimized.repair_successes,
+            "schema_validation_failures": report.optimized.schema_validation_failures,
         },
         "warnings": report.warnings,
     }

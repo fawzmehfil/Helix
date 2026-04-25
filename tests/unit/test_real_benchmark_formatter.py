@@ -34,6 +34,7 @@ def _result(mode: str, latency: float, tokens: int, cost: float, calls: int) -> 
         avg_similarity_score=0.0,
         repair_attempts=0,
         repair_successes=0,
+        schema_validation_failures=0,
         per_step=[],
         timestamp=dt.datetime.now(dt.UTC),
     )
