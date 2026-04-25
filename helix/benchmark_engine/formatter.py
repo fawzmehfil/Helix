@@ -88,6 +88,20 @@ class ReportFormatter:
         console.print(
             f"Graph:  {report.baseline.steps_executed} nodes  ({report.optimized.steps_graph_reused} reused this run)"
         )
+        console.print()
+        console.print("Context minimization:")
+        console.print(f"  Raw input tokens:        {report.optimized.raw_input_tokens}")
+        console.print(f"  Projected input tokens:  {report.optimized.projected_input_tokens}")
+        console.print(f"  Overhead tokens:         {report.optimized.optimization_overhead_tokens}")
+        console.print(f"  Final minimized tokens:  {report.optimized.minimized_input_tokens}")
+        console.print(f"  Removed by projection:   {report.optimized.tokens_removed_by_projection}")
+        console.print(
+            f"  Net tokens saved:        {report.optimized.net_tokens_saved_by_minimization:+d}"
+        )
+        if report.optimized.net_tokens_saved_by_minimization <= 0:
+            console.print("  Effective:               no")
+        else:
+            console.print("  Effective:               yes")
         if report.warnings:
             console.print()
             console.print("WARNING: Optimization regression detected")
@@ -128,16 +142,21 @@ class ReportFormatter:
         console.print()
         console.print("Context minimization:")
         console.print(f"Raw input tokens:        {report.optimized.raw_input_tokens}")
-        console.print(f"Minimized input tokens:  {report.optimized.minimized_input_tokens}")
-        console.print(f"Tokens removed:          {report.optimized.tokens_saved_by_minimization}")
+        console.print(f"Projected input tokens:  {report.optimized.projected_input_tokens}")
         console.print(f"Overhead tokens:         {report.optimized.optimization_overhead_tokens}")
-        console.print(f"Net token change:        {report.optimized.net_token_change:+d}")
+        console.print(f"Final minimized tokens:  {report.optimized.minimized_input_tokens}")
+        console.print(f"Removed by projection:   {report.optimized.tokens_removed_by_projection}")
+        console.print(f"Net tokens saved:        {report.optimized.net_tokens_saved_by_minimization:+d}")
+        console.print(f"Budget trimmed tokens:   {report.optimized.tokens_trimmed_by_budget}")
         reduction = (
-            report.optimized.tokens_saved_by_minimization / report.optimized.raw_input_tokens * 100.0
+            report.optimized.net_tokens_saved_by_minimization / report.optimized.raw_input_tokens * 100.0
             if report.optimized.raw_input_tokens
             else 0.0
         )
-        console.print(f"Reduction:               {reduction:.1f}%")
+        if report.optimized.net_tokens_saved_by_minimization > 0:
+            console.print(f"Reduction:               {reduction:.1f}%")
+        else:
+            console.print("Reduction:               0.0% (not effective)")
         console.print()
         console.print("Attribution:")
         console.print(f"Calls avoided:             {report.calls_avoided}")
@@ -164,10 +183,13 @@ class ReportFormatter:
         table.add_column("step_id")
         table.add_column("decision")
         table.add_column("raw input", justify="right")
-        table.add_column("min input", justify="right")
+        table.add_column("projected", justify="right")
         table.add_column("removed", justify="right")
         table.add_column("overhead", justify="right")
-        table.add_column("net", justify="right")
+        table.add_column("final", justify="right")
+        table.add_column("net saved", justify="right")
+        table.add_column("effective")
+        table.add_column("budget")
         table.add_column("cache")
         table.add_column("semantic")
         table.add_column("similarity", justify="right")
@@ -179,10 +201,13 @@ class ReportFormatter:
                 step.step_id,
                 step.decision.value,
                 str(step.raw_input_tokens),
-                str(step.minimized_input_tokens),
-                str(step.tokens_saved_by_minimization),
+                str(step.projected_input_tokens),
+                str(step.tokens_removed_by_projection),
                 str(step.optimization_overhead_tokens),
-                f"{step.net_token_change:+d}",
+                str(step.minimized_input_tokens),
+                f"{step.net_tokens_saved_by_minimization:+d}",
+                "yes" if step.minimization_effective else "no",
+                "yes" if step.budget_applied else "no",
                 "yes" if step.cache_hit else "no",
                 "yes" if step.semantic_cache_hit else "no",
                 f"{step.similarity_score:.3f}" if step.semantic_reuse_applied else "-",

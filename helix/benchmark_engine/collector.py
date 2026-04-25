@@ -58,11 +58,24 @@ class BenchmarkCollector:
             steps_skipped=sum(1 for step in self.steps if step.decision == ExecutionDecisionType.SKIP),
             calls=sum(step.call_count for step in self.steps),
             raw_input_tokens=sum(step.raw_input_tokens for step in self.steps),
+            projected_input_tokens=sum(step.projected_input_tokens for step in self.steps),
             minimized_input_tokens=sum(step.minimized_input_tokens for step in self.steps),
-            tokens_saved_by_minimization=sum(
-                step.tokens_saved_by_minimization for step in self.steps
+            tokens_removed_by_projection=sum(
+                step.tokens_removed_by_projection for step in self.steps
             ),
             optimization_overhead_tokens=sum(step.optimization_overhead_tokens for step in self.steps),
+            net_tokens_saved_by_minimization=sum(
+                step.net_tokens_saved_by_minimization for step in self.steps
+            ),
+            minimization_effective_steps=sum(1 for step in self.steps if step.minimization_effective),
+            tokens_trimmed_by_budget=sum(step.tokens_trimmed_by_budget for step in self.steps),
+            budget_applied_steps=sum(1 for step in self.steps if step.budget_applied),
+            minimization_warnings=[
+                warning
+                for step in self.steps
+                for warning in step.minimization_warnings
+            ],
+            tokens_saved_by_minimization=sum(step.tokens_saved_by_minimization for step in self.steps),
             net_token_change=sum(step.net_token_change for step in self.steps),
             semantic_cache_hits=sum(1 for step in self.steps if step.semantic_cache_hit),
             avg_similarity_score=(

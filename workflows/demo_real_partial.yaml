@@ -16,6 +16,7 @@ steps:
     step_type: llm_call
     compact: true
     output_format: json
+    required_fields: ["doc_type", "region"]
     max_output_tokens: 60
     messages:
       - role: system
@@ -30,6 +31,7 @@ steps:
         fields: ["doc_type", "region"]
     compact: true
     output_format: json
+    required_fields: ["category", "confidence"]
     max_output_tokens: 60
     messages:
       - role: system
@@ -40,6 +42,7 @@ steps:
     step_type: llm_call
     compact: true
     output_format: json
+    required_fields: ["items", "due_days"]
     max_output_tokens: 80
     messages:
       - role: system
@@ -56,6 +59,7 @@ steps:
         fields: ["category", "confidence"]
     compact: true
     output_format: json
+    required_fields: ["valid", "reason"]
     max_output_tokens: 60
     messages:
       - role: system
@@ -70,6 +74,7 @@ steps:
         fields: ["items", "due_days"]
     compact: true
     output_format: json
+    required_fields: ["summary"]
     max_output_tokens: 60
     messages:
       - role: system

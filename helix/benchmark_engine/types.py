@@ -26,9 +26,16 @@ class BenchmarkResult:
     steps_skipped: int
     calls: int
     raw_input_tokens: int
+    projected_input_tokens: int
     minimized_input_tokens: int
-    tokens_saved_by_minimization: int
+    tokens_removed_by_projection: int
     optimization_overhead_tokens: int
+    net_tokens_saved_by_minimization: int
+    minimization_effective_steps: int
+    tokens_trimmed_by_budget: int
+    budget_applied_steps: int
+    minimization_warnings: list[str]
+    tokens_saved_by_minimization: int
     net_token_change: int
     semantic_cache_hits: int
     avg_similarity_score: float

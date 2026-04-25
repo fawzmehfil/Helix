@@ -64,12 +64,13 @@ class BenchmarkRunner:
                 f"optimized calls exceeded baseline by "
                 f"{self._increase_pct(optimized.calls, baseline.calls):.1f}%"
             )
-        if optimized.optimization_overhead_tokens > optimized.tokens_saved_by_minimization:
+        if optimized.optimization_overhead_tokens > optimized.tokens_removed_by_projection:
             warnings.append(
                 "minimization overhead exceeded savings "
                 f"({optimized.optimization_overhead_tokens} overhead vs "
-                f"{optimized.tokens_saved_by_minimization} removed)"
+                f"{optimized.tokens_removed_by_projection} removed)"
             )
+        warnings.extend(optimized.minimization_warnings)
         return warnings
 
     def run_comparison(self, workflow: Workflow, inputs: dict[str, str]) -> AttributionReport:

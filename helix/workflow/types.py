@@ -31,10 +31,12 @@ class WorkflowStep:
     depends_on: list[str] = field(default_factory=list)
     cacheable: bool = True
     tags: list[str] = field(default_factory=list)
-    input_projection: dict[str, dict[str, list[str]]] = field(default_factory=dict)
+    input_projection: dict[str, dict[str, Any]] = field(default_factory=dict)
     output_format: Optional[str] = None
     compact: bool = False
     max_output_tokens: Optional[int] = None
+    max_input_tokens: Optional[int] = None
+    max_dependency_tokens: Optional[int] = None
     semantic_reuse: bool = False
     semantic_threshold: float = 0.92
     required_fields: list[str] = field(default_factory=list)
@@ -69,9 +71,16 @@ class StepResult:
     estimated_cost_usd: float = 0.0
     call_count: int = 0
     raw_input_tokens: int = 0
+    projected_input_tokens: int = 0
     minimized_input_tokens: int = 0
-    tokens_saved_by_minimization: int = 0
+    tokens_removed_by_projection: int = 0
     optimization_overhead_tokens: int = 0
+    net_tokens_saved_by_minimization: int = 0
+    minimization_effective: bool = False
+    tokens_trimmed_by_budget: int = 0
+    budget_applied: bool = False
+    minimization_warnings: list[str] = field(default_factory=list)
+    tokens_saved_by_minimization: int = 0
     net_token_change: int = 0
     raw_messages: list[dict[str, Any]] = field(default_factory=list)
     minimized_messages: list[dict[str, Any]] = field(default_factory=list)

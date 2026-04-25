@@ -35,6 +35,8 @@ class WorkflowParser:
                 output_format=item.get("output_format"),
                 compact=bool(item.get("compact", False)),
                 max_output_tokens=item.get("max_output_tokens"),
+                max_input_tokens=item.get("max_input_tokens"),
+                max_dependency_tokens=item.get("max_dependency_tokens"),
                 semantic_reuse=bool(item.get("semantic_reuse", False)),
                 semantic_threshold=float(item.get("semantic_threshold", 0.92)),
                 required_fields=list(item.get("required_fields", [])),

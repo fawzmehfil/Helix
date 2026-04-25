@@ -1,0 +1,61 @@
+workflow_id: demo_token_minimization_v1
+name: "Token Minimization Demo"
+description: "Workflow with intentionally large unused upstream context that projection removes."
+default_model: fake
+metadata:
+  warmup_inputs:
+    document: "Invoice package for Acme Medical. The changed section says risk is high and owner is operations."
+  measured_inputs:
+    document: "Invoice package for Acme Medical. The changed section says risk is high and owner is operations."
+steps:
+  - step_id: extract_metadata
+    step_type: tool_call
+    model: fake
+    tool_name: echo
+    tool_args:
+      doc_type: invoice
+      region: US
+      priority: high
+      changed_section: "Risk level is high. Owner is operations. Payment window changed from thirty days to fifteen days."
+      risk_level: high
+      owner: operations
+      irrelevant_notes: "Long audit trail: intake clerk reviewed attachment history, vendor address normalization, invoice image quality, operator routing notes, duplicate package hints, OCR confidence commentary, warehouse receiving comments, approval-chain background, and historical exception notes that downstream routing does not need."
+  - step_id: classify_or_route
+    step_type: llm_call
+    model: fake
+    depends_on: [extract_metadata]
+    input_projection:
+      extract_metadata:
+        fields: ["doc_type", "priority"]
+    max_input_tokens: 80
+    messages:
+      - role: system
+        content: "Route document."
+      - role: user
+        content: "Route using only this metadata: {extract_metadata.output}"
+  - step_id: summarize_change
+    step_type: llm_call
+    model: fake
+    depends_on: [extract_metadata]
+    input_projection:
+      extract_metadata:
+        fields: ["changed_section"]
+    max_input_tokens: 80
+    messages:
+      - role: system
+        content: "Summarize changed section."
+      - role: user
+        content: "Summarize the changed section only from: {extract_metadata.output.changed_section}"
+  - step_id: action_items
+    step_type: llm_call
+    model: fake
+    depends_on: [extract_metadata]
+    input_projection:
+      extract_metadata:
+        fields: ["risk_level", "owner"]
+    max_input_tokens: 80
+    messages:
+      - role: system
+        content: "Create action items."
+      - role: user
+        content: "Create action items using risk and owner: {extract_metadata.output}"

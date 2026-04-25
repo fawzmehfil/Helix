@@ -55,23 +55,46 @@ class WorkflowRunner:
                 return content
         return content
 
-    def _project_response(self, step_id: str, response: dict, projection: dict[str, dict[str, list[str]]]) -> str:
+    def _get_path_value(self, value: Any, path: str) -> Any:
+        current = value
+        for part in path.split("."):
+            if isinstance(current, dict):
+                current = current.get(part, "")
+            else:
+                return ""
+        return current
+
+    def _truncate_text(self, text: str, spec: dict[str, Any]) -> str:
+        if "max_chars" in spec:
+            return text[: int(spec["max_chars"])]
+        if "max_words" in spec:
+            return " ".join(text.split()[: int(spec["max_words"])])
+        if spec.get("mode") == "first_sentence" or spec.get("first_sentence"):
+            match = re.search(r"(.+?[.!?])(?:\s|$)", text)
+            return match.group(1) if match else text.split("\n", 1)[0]
+        return text
+
+    def _project_response(self, step_id: str, response: dict, projection: dict[str, dict[str, Any]]) -> str:
         spec = projection.get(step_id)
         content = self._coerce_output_content(response)
         if not spec:
             return self._compact_json(content) if isinstance(content, (dict, list)) else str(content)
         fields = spec.get("fields", [])
         if isinstance(content, dict):
-            selected = {field: content[field] for field in fields if field in content}
+            selected = {
+                field: self._get_path_value(content, field)
+                for field in fields
+                if self._get_path_value(content, field) != ""
+            }
             return self._compact_json(selected)
-        return str(content)
+        return self._truncate_text(str(content), spec)
 
     def _resolve_text(
         self,
         text: str,
         inputs: dict[str, str],
         outputs: dict[str, dict],
-        projection: dict[str, dict[str, list[str]]] | None = None,
+        projection: dict[str, dict[str, Any]] | None = None,
     ) -> str:
         projection = projection or {}
 
@@ -81,7 +104,7 @@ class WorkflowRunner:
                 step_id, field = key.split(".output.", 1)
                 content = self._coerce_output_content(outputs.get(step_id, {}))
                 if isinstance(content, dict):
-                    value = content.get(field, "")
+                    value = self._get_path_value(content, field)
                     return self._compact_json(value) if isinstance(value, (dict, list)) else str(value)
                 return ""
             if key.endswith(".output"):
@@ -96,7 +119,7 @@ class WorkflowRunner:
         value: Any,
         inputs: dict[str, str],
         outputs: dict[str, dict],
-        projection: dict[str, dict[str, list[str]]] | None = None,
+        projection: dict[str, dict[str, Any]] | None = None,
     ) -> Any:
         if isinstance(value, str):
             return self._resolve_text(value, inputs, outputs, projection)
@@ -112,9 +135,13 @@ class WorkflowRunner:
     def _apply_compact_instructions(self, step) -> None:
         if not step.compact:
             return
-        instruction = "Be concise. Return no explanation."
+        if step.output_format == "json" and not (
+            step.required_fields or any(spec.get("fields") for spec in step.input_projection.values())
+        ):
+            return
+        instruction = "Be concise."
         if step.output_format == "json":
-            instruction = "Return ONLY compact JSON with no explanation."
+            instruction = "Return compact JSON only."
         if step.messages and step.messages[0].get("role") == "system":
             step.messages[0]["content"] = f"{step.messages[0].get('content', '')} {instruction}"
         else:
@@ -154,6 +181,38 @@ class WorkflowRunner:
                 content = " ".join(words[:80])
             message["content"] = content
 
+    def _apply_prompt_budget(self, step, messages: list[dict]) -> tuple[list[dict], int, bool]:
+        if step.max_dependency_tokens is None and step.max_input_tokens is None:
+            return messages, 0, False
+        if not step.depends_on:
+            return messages, 0, False
+        trimmed = deepcopy(messages)
+        before = self._estimate_tokens(trimmed)
+        applied = False
+        if step.max_dependency_tokens is not None:
+            for message in trimmed:
+                content = str(message.get("content", ""))
+                if "{" in content or message.get("role") == "system":
+                    continue
+                words = content.split()
+                limit = int(step.max_dependency_tokens / 1.3)
+                if len(words) > limit:
+                    message["content"] = " ".join(words[:limit])
+                    applied = True
+        if step.max_input_tokens is not None:
+            while self._estimate_tokens(trimmed) > step.max_input_tokens:
+                candidates = [m for m in trimmed if m.get("role") != "system"]
+                if not candidates:
+                    break
+                target = max(candidates, key=lambda item: len(str(item.get("content", "")).split()))
+                words = str(target.get("content", "")).split()
+                if len(words) <= 1:
+                    break
+                target["content"] = " ".join(words[:-1])
+                applied = True
+        after = self._estimate_tokens(trimmed)
+        return trimmed, max(0, before - after), applied
+
     def _messages_fingerprint(self, messages: list[dict]) -> str:
         return json.dumps(messages, sort_keys=True)
 
@@ -161,7 +220,7 @@ class WorkflowRunner:
         if current.step_type == WorkflowStepType.TOOL_CALL:
             tool_response = self.tool_client.call(current.tool_name or "echo", current.tool_args or {})
             return {
-                "content": str(tool_response["result"]),
+                "content": self._compact_json(tool_response["result"]),
                 "input_tokens": 0,
                 "output_tokens": 0,
                 "model": current.model,
@@ -235,6 +294,8 @@ class WorkflowRunner:
         raw_messages: list[dict],
         minimized_messages: list[dict],
         projection_messages: list[dict] | None = None,
+        tokens_trimmed_by_budget: int = 0,
+        budget_applied: bool = False,
         repair_attempted: bool = False,
         repair_successful: bool = False,
         structured_output_failed: bool = False,
@@ -247,6 +308,13 @@ class WorkflowRunner:
         minimized_input_tokens = self._estimate_tokens(minimized_messages)
         projected_tokens = self._estimate_tokens(projection_messages or minimized_messages)
         optimization_overhead_tokens = max(0, minimized_input_tokens - projected_tokens)
+        tokens_removed_by_projection = max(0, raw_input_tokens - projected_tokens)
+        net_tokens_saved = raw_input_tokens - minimized_input_tokens
+        warnings = []
+        if minimized_input_tokens > raw_input_tokens:
+            warnings.append("Context minimization regression: optimized prompt larger than raw prompt")
+        if optimization_overhead_tokens > tokens_removed_by_projection:
+            warnings.append("Optimization overhead exceeded projection savings")
         return StepResult(
             current.step_id,
             decision_type,
@@ -266,9 +334,16 @@ class WorkflowRunner:
                 else 0
             ),
             raw_input_tokens,
+            projected_tokens,
             minimized_input_tokens,
-            max(0, raw_input_tokens - minimized_input_tokens),
+            tokens_removed_by_projection,
             optimization_overhead_tokens,
+            net_tokens_saved,
+            net_tokens_saved > 0,
+            tokens_trimmed_by_budget,
+            budget_applied,
+            warnings,
+            max(0, raw_input_tokens - minimized_input_tokens),
             minimized_input_tokens - raw_input_tokens,
             raw_messages,
             minimized_messages,
@@ -296,10 +371,14 @@ class WorkflowRunner:
                     "output_tokens": step.output_tokens,
                     "latency_ms": step.latency_ms,
                     "raw_input_tokens": step.raw_input_tokens,
+                    "projected_input_tokens": step.projected_input_tokens,
                     "minimized_input_tokens": step.minimized_input_tokens,
-                    "tokens_saved_by_minimization": step.tokens_saved_by_minimization,
+                    "tokens_removed_by_projection": step.tokens_removed_by_projection,
                     "optimization_overhead_tokens": step.optimization_overhead_tokens,
-                    "net_token_change": step.net_token_change,
+                    "net_tokens_saved_by_minimization": step.net_tokens_saved_by_minimization,
+                    "tokens_trimmed_by_budget": step.tokens_trimmed_by_budget,
+                    "budget_applied": step.budget_applied,
+                    "minimization_effective": step.minimization_effective,
                     "repair_attempted": step.repair_attempted,
                     "repair_successful": step.repair_successful,
                     "semantic_cache_hit": step.semantic_cache_hit,
@@ -395,6 +474,11 @@ class WorkflowRunner:
                 current = partial.steps[0]
                 if not self.baseline_mode:
                     self._minimize_step_context(current)
+                budget_messages, tokens_trimmed_by_budget, budget_applied = self._apply_prompt_budget(
+                    current,
+                    current.messages,
+                )
+                current.messages = budget_messages
                 raw_messages = deepcopy(raw_current.messages)
                 projection_messages = deepcopy(projected_resolved.steps[index].messages)
                 minimized_messages = deepcopy(current.messages)
@@ -420,6 +504,8 @@ class WorkflowRunner:
                         raw_messages,
                         minimized_messages,
                         projection_messages,
+                        tokens_trimmed_by_budget,
+                        budget_applied,
                     )
                     outputs[current.step_id] = response
                     step_results.append(result)
@@ -471,6 +557,8 @@ class WorkflowRunner:
                     raw_messages,
                     minimized_messages,
                     projection_messages,
+                    tokens_trimmed_by_budget,
+                    budget_applied,
                     repair_attempted,
                     repair_successful,
                     structured_failed,
