@@ -2,7 +2,7 @@
 
 Helix is a computation-aware execution optimizer for LLM agent workflows. It wraps YAML-defined workflows, records deterministic context hashes, and reuses safe prior computations through SQLite-backed cache and graph stores.
 
-Helix v0 is measurement-first and local-first. The fake backend is deterministic and requires no API keys, which makes the benchmark path reproducible on a fresh machine.
+![Cover](assets/Helix_dark_banner.png)
 
 ## Installation
 
