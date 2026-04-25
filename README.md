@@ -2,7 +2,7 @@
 
 Helix is a computation-aware execution optimizer for LLM agent workflows. It wraps YAML-defined workflows, records deterministic context hashes, and reuses safe prior computations through SQLite-backed cache and graph stores.
 
-![Cover](assets/Helix_dark_banner.png)
+![Cover](assets/Helix_light_banner.png)
 
 ## Installation
 
