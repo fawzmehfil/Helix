@@ -25,7 +25,7 @@ class EmbeddingConfig:
 class SemanticReviewConfig:
     """Semantic reuse review configuration."""
 
-    mode: str = "interactive"
+    mode: str = "auto_accept"
 
 
 @dataclass

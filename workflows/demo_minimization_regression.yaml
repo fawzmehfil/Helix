@@ -1,0 +1,47 @@
+workflow_id: demo_minimization_regression_v1
+name: "Minimization Overhead Failure Case"
+description: "Failure case: tiny prompts where structured-output instructions can cost more than projection saves."
+default_model: gpt-4o-mini
+metadata:
+  measured_inputs:
+    label: "invoice"
+steps:
+  # Tiny JSON step: overhead can dominate because there is little context to remove.
+  - step_id: tiny_extract
+    step_type: llm_call
+    compact: true
+    output_format: json
+    required_fields: ["label"]
+    output_schema:
+      type: object
+      properties:
+        label: {type: string}
+      required: ["label"]
+    max_output_tokens: 30
+    messages:
+      - role: system
+        content: "Extract label."
+      - role: user
+        content: "{label}"
+
+  # Projection exists, but the upstream payload is already tiny.
+  - step_id: tiny_route
+    step_type: llm_call
+    depends_on: [tiny_extract]
+    input_projection:
+      tiny_extract:
+        fields: ["label"]
+    compact: true
+    output_format: json
+    required_fields: ["route"]
+    output_schema:
+      type: object
+      properties:
+        route: {type: string}
+      required: ["route"]
+    max_output_tokens: 30
+    messages:
+      - role: system
+        content: "Route label."
+      - role: user
+        content: "{tiny_extract.output.label}"

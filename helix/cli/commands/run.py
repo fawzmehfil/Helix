@@ -36,13 +36,13 @@ def _kv_value(step: StepResult, field: str) -> str:
 @click.option("--inputs", multiple=True, help="Template input as key=value.")
 @click.option("--backend", default="fake", type=click.Choice(["fake", "openai", "anthropic"]))
 @click.option("--verbose", is_flag=True, help="Show decision reasons.")
-@click.option("--dry-run", is_flag=True, help="Show planned workflow without execution.")
+@click.option("--dry-run", is_flag=True, help="Show planned execution graph without executing it.")
 def run_cmd(workflow_path: str, inputs: tuple[str, ...], backend: str, verbose: bool, dry_run: bool) -> None:
-    """Run a workflow in optimized mode."""
+    """Execute an AI workload in optimized mode."""
     workflow = WorkflowParser().parse_file(workflow_path)
     if dry_run:
-        table = Table(title=f"Workflow {workflow.workflow_id}")
-        table.add_column("Step")
+        table = Table(title=f"Execution graph {workflow.workflow_id}")
+        table.add_column("Node")
         table.add_column("Type")
         table.add_column("Model")
         table.add_column("Depends on")
@@ -57,7 +57,7 @@ def run_cmd(workflow_path: str, inputs: tuple[str, ...], backend: str, verbose: 
         for decision in (result.optimization_plan.decisions if result.optimization_plan else [])
     }
     if verbose:
-        table = Table(title=f"Helix run: {workflow.workflow_id}")
+        table = Table(title=f"Helix execution: {workflow.workflow_id}")
         table.add_column("Field")
         for step in result.step_results:
             table.add_column(step.step_id)
@@ -112,8 +112,8 @@ def run_cmd(workflow_path: str, inputs: tuple[str, ...], backend: str, verbose: 
         console.print(table)
         return
     else:
-        table = Table(title=f"Helix run: {workflow.workflow_id}")
-        table.add_column("Step")
+        table = Table(title=f"Helix execution: {workflow.workflow_id}")
+        table.add_column("Node")
         table.add_column("Decision")
         table.add_column("Input")
         table.add_column("Output")

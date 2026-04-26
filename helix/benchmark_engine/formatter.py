@@ -40,6 +40,118 @@ class ReportFormatter:
             else "Helix benchmark completed"
         )
 
+    def _arrow_line(self, label: str, before: str, after: str, pct: float) -> str:
+        direction = "+" if pct < 0 else "-"
+        value = abs(pct)
+        return f"{label:<10} {before} -> {after}  ({direction}{value:.1f}%)"
+
+    def format_concise_report(self, report: AttributionReport) -> str:
+        """Format a concise CI-friendly benchmark report."""
+        out = StringIO()
+        console = Console(file=out, force_terminal=False, width=100)
+        model = next((step.model for step in report.baseline.per_step if step.model != "unknown"), "unknown")
+        cache_hits = report.optimized.steps_cached
+        semantic_hits = report.optimized.semantic_cache_hits
+        steps_skipped = (
+            report.optimized.steps_cached
+            + report.optimized.steps_graph_reused
+            + report.optimized.steps_skipped
+        )
+        total_nodes = max(
+            report.optimized.steps_executed + steps_skipped,
+            report.baseline.steps_executed,
+            1,
+        )
+        exact_hits = max(cache_hits - semantic_hits, 0)
+        reuse_rate = steps_skipped / total_nodes * 100.0
+        recomputation_ratio = report.optimized.steps_executed / total_nodes * 100.0
+        dependency_reuse_ratio = steps_skipped / total_nodes * 100.0
+        critical_path_ms = (
+            report.optimized.critical_path_latency_ms
+            if report.optimized.critical_path_latency_ms
+            else report.optimized.total_latency_ms
+        )
+        parallel_efficiency = (
+            report.optimized.parallel_speedup_factor / report.optimized.max_concurrency
+            if report.optimized.max_concurrency > 1
+            else 1.0
+        )
+        context_reduction = (
+            report.optimized.net_tokens_saved_by_minimization / report.optimized.raw_input_tokens * 100.0
+            if report.optimized.raw_input_tokens
+            else 0.0
+        )
+        console.print("=== HELIX REPORT ===")
+        console.print()
+        console.print(f"Model: {model}")
+        console.print()
+        console.print(
+            self._arrow_line(
+                "Latency:",
+                f"{report.baseline.total_latency_ms / 1000.0:.2f}s",
+                f"{report.optimized.total_latency_ms / 1000.0:.2f}s",
+                report.latency_saved_pct,
+            )
+        )
+        console.print(
+            self._arrow_line(
+                "Cost:",
+                f"${report.baseline.estimated_cost_usd:.6f}",
+                f"${report.optimized.estimated_cost_usd:.6f}",
+                report.cost_saved_pct,
+            )
+        )
+        console.print(
+            self._arrow_line(
+                "Tokens:",
+                str(report.baseline.total_tokens),
+                str(report.optimized.total_tokens),
+                report.tokens_saved_pct,
+            )
+        )
+        console.print(f"{'Calls:':<10} {report.baseline.calls} -> {report.optimized.calls}")
+        console.print()
+        console.print("Breakdown:")
+        console.print(f"- cache hits: {cache_hits}")
+        console.print(f"- semantic hits: {semantic_hits}")
+        console.print(f"- nodes skipped: {steps_skipped}")
+        console.print()
+        console.print("Computation store:")
+        console.print(f"- exact hits: {exact_hits}")
+        console.print(f"- semantic hits: {semantic_hits}")
+        console.print("- invalidations: hash-based")
+        console.print(f"- reuse rate: {reuse_rate:.1f}%")
+        console.print()
+        console.print("Execution metrics:")
+        console.print(f"- compute avoided: {max(report.tokens_avoided, 0)} tokens")
+        console.print(f"- recomputation ratio: {recomputation_ratio:.1f}%")
+        console.print(f"- dependency reuse ratio: {dependency_reuse_ratio:.1f}%")
+        console.print(f"- critical path latency: {critical_path_ms / 1000.0:.2f}s")
+        console.print(f"- parallel efficiency: {parallel_efficiency:.2f}")
+        console.print()
+        console.print("Context:")
+        console.print(
+            f"- raw -> final: {report.optimized.raw_input_tokens} -> "
+            f"{report.optimized.minimized_input_tokens} (-{max(context_reduction, 0.0):.1f}%)"
+        )
+        if report.optimized.semantic_cache_hits or report.optimized.semantic_reuse_rejected:
+            console.print()
+            console.print("Semantic reuse:")
+            console.print(f"- accepted: {report.optimized.semantic_reuse_accepted}")
+            console.print(f"- rejected: {report.optimized.semantic_reuse_rejected}")
+            console.print(f"- avg similarity: {report.optimized.avg_similarity_score:.3f}")
+        if report.optimized.max_concurrency > 1:
+            console.print()
+            console.print("Parallel:")
+            console.print(f"- max concurrency: {report.optimized.max_concurrency}")
+            console.print(f"- speedup: {report.optimized.parallel_speedup_factor:.2f}x")
+        if report.warnings:
+            console.print()
+            console.print("Warnings:")
+            for warning in report.warnings:
+                console.print(f"- {warning}")
+        return out.getvalue()
+
     def format_attribution(self, report: AttributionReport) -> str:
         """Returns the terminal report string."""
         out = StringIO()
@@ -50,9 +162,9 @@ class ReportFormatter:
         console.print()
         console.print(self._headline(report))
         console.print()
-        console.print(f"Workflow:      {report.baseline.workflow_id}")
+        console.print(f"Execution graph: {report.baseline.workflow_id}")
         console.print("Backend:       fake / fake")
-        console.print(f"Run ID:        {report.optimized.run_id}")
+        console.print(f"Execution ID:  {report.optimized.run_id}")
         console.print(f"Timestamp:     {report.optimized.timestamp.isoformat()}")
         console.print()
         table = Table(show_header=True, header_style="bold", box=None)
@@ -73,7 +185,7 @@ class ReportFormatter:
             self._savings(report.cost_saved_pct, cost=True),
         )
         table.add_row(
-            "Steps executed",
+            "Nodes executed",
             str(report.baseline.steps_executed),
             str(report.optimized.steps_executed),
             self._savings((report.steps_reduced / report.baseline.steps_executed * 100.0) if report.baseline.steps_executed else 0.0),
@@ -204,7 +316,7 @@ class ReportFormatter:
         console.print("Attribution:")
         console.print(f"Calls avoided:             {report.calls_avoided}")
         console.print(f"Tokens avoided:            {report.tokens_avoided}")
-        console.print(f"Steps skipped:             {report.optimized.steps_cached + report.optimized.steps_graph_reused + report.optimized.steps_skipped}")
+        console.print(f"Nodes skipped:             {report.optimized.steps_cached + report.optimized.steps_graph_reused + report.optimized.steps_skipped}")
         exact_cache_hits = report.optimized.steps_cached - report.optimized.semantic_cache_hits
         console.print(f"Exact cache hits:          {exact_cache_hits}")
         console.print(f"Semantic cache hits:       {report.optimized.semantic_cache_hits}")
@@ -215,8 +327,8 @@ class ReportFormatter:
         console.print(f"Embedding calls:           {report.optimized.embedding_calls}")
         console.print(f"Embedding latency:         {report.optimized.embedding_latency_ms:.0f}ms")
         console.print(f"Graph reuse:               {report.optimized.steps_graph_reused}")
-        console.print(f"Steps eliminated:          {report.steps_eliminated}")
-        console.print(f"Partial recomputation:     {report.partial_recomputation_steps} reused steps")
+        console.print(f"Nodes eliminated:          {report.steps_eliminated}")
+        console.print(f"Partial recomputation:     {report.partial_recomputation_steps} reused nodes")
         console.print()
         console.print("Structured output:")
         console.print(f"Repair attempts:           {report.optimized.repair_attempts}")
@@ -235,9 +347,9 @@ class ReportFormatter:
             console.print(f"Critical path:             {report.optimized.critical_path_latency_ms:.0f}ms")
             console.print(f"Speedup:                   {report.optimized.parallel_speedup_factor:.2f}x")
             console.print(f"Max concurrency:           {report.optimized.max_concurrency}")
-            console.print(f"Parallel steps executed:   {report.optimized.parallel_steps_executed}")
+            console.print(f"Parallel nodes executed:   {report.optimized.parallel_steps_executed}")
         console.print()
-        table = Table(title="Per-step optimized metrics", box=None)
+        table = Table(title="Per-node optimized metrics", box=None)
         table.add_column("step_id")
         table.add_column("decision")
         table.add_column("raw input", justify="right")
@@ -293,8 +405,8 @@ class ReportFormatter:
         """Format a workflow run result."""
         out = StringIO()
         console = Console(file=out, force_terminal=False)
-        table = Table(title=f"Run {result.run_id}")
-        table.add_column("Step")
+        table = Table(title=f"Execution {result.run_id}")
+        table.add_column("Node")
         table.add_column("Decision")
         table.add_column("Input")
         table.add_column("Output")
@@ -308,5 +420,5 @@ class ReportFormatter:
         """Format one benchmark result."""
         return (
             f"{result.mode}: latency={result.total_latency_ms:.0f}ms "
-            f"tokens={result.total_tokens} steps={result.steps_executed}"
+            f"tokens={result.total_tokens} nodes={result.steps_executed}"
         )

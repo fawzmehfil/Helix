@@ -1,0 +1,152 @@
+workflow_id: demo_realistic_pipeline_v1
+name: "Realistic Document Processing Pipeline"
+description: "Production-like multi-branch pipeline for document classification, extraction, quality checks, and reporting."
+default_model: gpt-4o-mini
+metadata:
+  warmup_inputs:
+    request: "Review the Acme imaging invoice for payment readiness"
+    document: |
+      Acme Medical submitted invoice 1007 for imaging sensors, calibration support, and a rush
+      delivery adjustment. The document includes a US billing address, two named approvers, a
+      net-30 payment term, and a procurement note saying the calibration visit was completed.
+
+      Supporting context: the customer account is in good standing, the purchase order is PO-7781,
+      the quoted sensor quantity was two units, and the compliance reviewer previously approved
+      the vendor for diagnostic imaging hardware. Internal notes mention that freight charges
+      should be reviewed when rush delivery appears on a supplier invoice.
+  measured_inputs:
+    request: "Check the ACME Medical imaging invoice for payment readiness"
+    document: |
+      Acme Medical submitted invoice 1007 for imaging sensors, calibration support, and a rush
+      delivery adjustment. The document includes a US billing address, two named approvers, a
+      net-15 payment term, and a procurement note saying the calibration visit was completed.
+
+      Supporting context: the customer account is in good standing, the purchase order is PO-7781,
+      the quoted sensor quantity was three units, and the compliance reviewer previously approved
+      the vendor for diagnostic imaging hardware. Internal notes mention that freight charges
+      should be reviewed when rush delivery appears on a supplier invoice.
+steps:
+  # Stable metadata branch. This usually reuses across the warmup and measured input.
+  - step_id: extract_metadata
+    step_type: llm_call
+    compact: true
+    output_format: json
+    required_fields: ["doc_type", "region", "vendor"]
+    output_schema:
+      type: object
+      properties:
+        doc_type: {type: string}
+        region: {type: string}
+        vendor: {type: string}
+        owner: {type: string}
+        notes: {type: string}
+      required: ["doc_type", "region", "vendor", "owner", "notes"]
+    max_output_tokens: 90
+    messages:
+      - role: system
+        content: "Extract stable document metadata as compact JSON."
+      - role: user
+        content: "{document}"
+
+  # Semantic branch. The measured request is similar but not identical.
+  - step_id: summarize_request
+    step_type: llm_call
+    semantic_reuse: true
+    semantic_threshold: 0.90
+    max_output_tokens: 70
+    messages:
+      - role: system
+        content: "Summarize the user request in one operational sentence."
+      - role: user
+        content: "{request}"
+
+  # Changed facts branch. The measured input changes quantity and payment term.
+  - step_id: extract_entities
+    step_type: llm_call
+    compact: true
+    output_format: json
+    required_fields: ["items", "payment_term", "purchase_order"]
+    output_schema:
+      type: object
+      properties:
+        items:
+          type: array
+          items: {type: string}
+        payment_term: {type: string}
+        purchase_order: {type: string}
+        audit_notes: {type: string}
+      required: ["items", "payment_term", "purchase_order", "audit_notes"]
+    max_output_tokens: 110
+    messages:
+      - role: system
+        content: "Extract invoice entities and changed commercial terms as JSON."
+      - role: user
+        content: "{document}"
+
+  # Classification only needs selected metadata fields.
+  - step_id: classify_content
+    step_type: llm_call
+    depends_on: [extract_metadata]
+    input_projection:
+      extract_metadata:
+        fields: ["doc_type", "region", "vendor"]
+    compact: true
+    output_format: json
+    required_fields: ["category", "risk_level"]
+    output_schema:
+      type: object
+      properties:
+        category: {type: string}
+        risk_level: {type: string}
+      required: ["category", "risk_level"]
+    max_output_tokens: 70
+    messages:
+      - role: system
+        content: "Classify the document routing category."
+      - role: user
+        content: "doc_type={extract_metadata.output.doc_type}; region={extract_metadata.output.region}; vendor={extract_metadata.output.vendor}"
+
+  # Quality check combines projected metadata and changed entity fields.
+  - step_id: quality_check
+    step_type: llm_call
+    depends_on: [extract_metadata, classify_content, extract_entities]
+    input_projection:
+      extract_metadata:
+        fields: ["doc_type", "region"]
+      classify_content:
+        fields: ["category", "risk_level"]
+      extract_entities:
+        fields: ["items", "payment_term", "purchase_order"]
+    compact: true
+    output_format: json
+    required_fields: ["valid", "issues"]
+    output_schema:
+      type: object
+      properties:
+        valid: {type: boolean}
+        issues:
+          type: array
+          items: {type: string}
+      required: ["valid", "issues"]
+    max_output_tokens: 90
+    messages:
+      - role: system
+        content: "Perform a concise invoice quality check."
+      - role: user
+        content: "metadata={extract_metadata.output}; classification={classify_content.output}; entities={extract_entities.output}"
+
+  # Final report receives only the outputs needed by the operator.
+  - step_id: aggregate_report
+    step_type: llm_call
+    depends_on: [summarize_request, quality_check, extract_entities]
+    input_projection:
+      quality_check:
+        fields: ["valid", "issues"]
+      extract_entities:
+        fields: ["items", "payment_term"]
+    max_output_tokens: 120
+    messages:
+      - role: system
+        content: "Write a concise payment-readiness report."
+      - role: user
+        content: "request={summarize_request.output}; quality={quality_check.output}; items={extract_entities.output.items}; payment_term={extract_entities.output.payment_term}"
