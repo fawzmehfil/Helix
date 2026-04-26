@@ -1,0 +1,109 @@
+workflow_id: demo_showcase_v1
+name: "Helix Showcase"
+description: "Flagship workflow showing partial recomputation, semantic reuse, context minimization, and parallel branches."
+default_model: gpt-4o-mini
+metadata:
+  warmup_inputs:
+    doc_type: "invoice"
+    region: "US"
+    request: "Summarize invoice for Acme Corp"
+    document: "Invoice 1007 from Acme Medical lists two imaging sensors, one calibration visit, US routing, and net-30 payment."
+  measured_inputs:
+    doc_type: "invoice"
+    region: "US"
+    request: "Summarize invoice for ACME Corporation"
+    document: "Invoice 1007 from Acme Medical lists three imaging sensors, one calibration visit, US routing, and net-15 payment."
+steps:
+  # Parallel branch: stable metadata can be reused across small document changes.
+  - step_id: extract_metadata
+    step_type: llm_call
+    output_format: json
+    required_fields: ["doc_type", "region"]
+    output_schema:
+      type: object
+      properties:
+        doc_type: {type: string}
+        region: {type: string}
+        owner: {type: string}
+        irrelevant_notes: {type: string}
+      required: ["doc_type", "region", "owner", "irrelevant_notes"]
+    max_output_tokens: 60
+    messages:
+      - role: system
+        content: "Extract compact document metadata."
+      - role: user
+        content: "Return JSON doc_type, region, owner, and irrelevant_notes for doc_type={doc_type}, region={region}."
+
+  # Parallel branch: semantic reuse can accept similar user intent.
+  - step_id: summarize_request
+    step_type: llm_call
+    semantic_reuse: true
+    semantic_threshold: 0.90
+    max_output_tokens: 50
+    messages:
+      - role: system
+        content: "Summarize the user request in one concise sentence."
+      - role: user
+        content: "{request}"
+
+  # Parallel branch: changed facts recompute when the document body changes.
+  - step_id: extract_changed_facts
+    step_type: llm_call
+    output_format: json
+    required_fields: ["items", "due_days"]
+    output_schema:
+      type: object
+      properties:
+        items:
+          type: array
+          items: {type: string}
+        due_days: {type: integer}
+        audit_notes: {type: string}
+      required: ["items", "due_days", "audit_notes"]
+    max_output_tokens: 70
+    messages:
+      - role: system
+        content: "Extract changed invoice facts."
+      - role: user
+        content: "Return JSON items, due_days, and audit_notes from: {document}"
+
+  # Projection keeps only doc_type and region from metadata.
+  - step_id: route_document
+    step_type: llm_call
+    depends_on: [extract_metadata]
+    input_projection:
+      extract_metadata:
+        fields: ["doc_type", "region"]
+    compact: true
+    output_format: json
+    required_fields: ["route"]
+    output_schema:
+      type: object
+      properties:
+        route: {type: string}
+      required: ["route"]
+    max_output_tokens: 40
+    messages:
+      - role: system
+        content: "Route the document."
+      - role: user
+        content: "Return JSON route for doc_type={extract_metadata.output.doc_type}; region={extract_metadata.output.region}."
+
+  # Final step combines only the fields it needs.
+  - step_id: final_report
+    step_type: llm_call
+    depends_on:
+      - summarize_request
+      - route_document
+      - extract_changed_facts
+    input_projection:
+      extract_changed_facts:
+        fields: ["items", "due_days"]
+      route_document:
+        fields: ["route"]
+    max_output_tokens: 80
+    messages:
+      - role: system
+        content: "Produce one concise workflow report."
+      - role: user
+        content: "request={summarize_request.output}; route={route_document.output.route}; items={extract_changed_facts.output.items}; due_days={extract_changed_facts.output.due_days}"

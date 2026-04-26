@@ -12,6 +12,7 @@ metadata:
     region: "US"
     body: "Invoice 1007 from Acme Medical for three imaging sensors and one calibration visit. Payment is due in fifteen days."
 steps:
+  # Stable branch: metadata does not change between warmup and measured input.
   - step_id: extract_metadata
     step_type: llm_call
     compact: true
@@ -32,6 +33,8 @@ steps:
         content: "Extract document metadata."
       - role: user
         content: "Return JSON doc_type, region, priority, owner, and irrelevant_notes for doc_type={doc_type}, region={region}."
+
+  # This step only uses doc_type and region, so extra metadata fields are projected away.
   - step_id: classify_document
     step_type: llm_call
     depends_on: [extract_metadata]
@@ -54,6 +57,8 @@ steps:
         content: "Classify a business document."
       - role: user
         content: "Return JSON category and confidence for doc_type={extract_metadata.output.doc_type}; region={extract_metadata.output.region}."
+
+  # Changed branch: measured input changes line-item facts, so this branch recomputes.
   - step_id: extract_line_items
     step_type: llm_call
     compact: true
@@ -75,6 +80,8 @@ steps:
         content: "Extract changed line-item facts."
       - role: user
         content: "Return JSON items, due_days, changed_section, and audit_notes from: {body}"
+
+  # Static validation reuses projected metadata/classification fields.
   - step_id: qc_static_fields
     step_type: llm_call
     depends_on: [extract_metadata, classify_document]
@@ -98,6 +105,8 @@ steps:
         content: "Validate stable routing fields."
       - role: user
         content: "Return JSON valid and reason for doc_type={extract_metadata.output.doc_type}; region={extract_metadata.output.region}; category={classify_document.output.category}; confidence={classify_document.output.confidence}."
+
+  # Downstream summary only receives the changed fields it needs.
   - step_id: summarize_change
     step_type: llm_call
     depends_on: [extract_line_items]

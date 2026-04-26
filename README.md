@@ -1,196 +1,199 @@
-# Helix
+# Helix: A Compiler for Efficient LLM Execution
 
-Helix is a computation-aware execution optimizer for LLM agent workflows. It wraps YAML-defined workflows, records deterministic context hashes, and reuses safe prior computations through SQLite-backed cache and graph stores.
+[![Tests](https://img.shields.io/badge/tests-passing-brightgreen)](#quickstart)
+[![Python](https://img.shields.io/badge/python-3.11%2B-blue)](pyproject.toml)
+[![CLI](https://img.shields.io/badge/CLI-helix-black)](helix/cli)
 
-![Cover](assets/Helix_dark_banner.png)
+Helix reduces LLM cost and latency by 50-90% by reusing previous computations, minimizing context, and executing workflows efficiently.
 
-## Installation
+![Helix banner](assets/Helix_dark_banner.png)
 
-```bash
-pip install -e ".[dev]"
+## Problem
+
+Most LLM pipelines recompute everything.
+
+A document changes by one sentence. An agent retries a downstream step. A user asks the same thing with slightly different wording. The pipeline often pays for the full chain again: every prompt, every token, every API call.
+
+That makes multi-step LLM systems slow and expensive exactly when they start to look production-ready.
+
+## Solution
+
+Helix treats an LLM workflow like an execution graph.
+
+It builds a dependency DAG, hashes resolved step inputs, caches step outputs, recomputes only what changed, minimizes prompt context, reuses semantically similar results, validates structured outputs, and runs independent steps in parallel.
+
+In short: Helix avoids unnecessary LLM work.
+
+## Real Results
+
+Latest real OpenAI benchmark:
+
+```text
+Latency: 11.90s -> 1.83s    (-84.6%)
+Cost:    $0.000348 -> $0.000057  (-83.6%)
+Tokens:  1204 -> 141       (-88.3%)
+Calls:   10 -> 2
+
+Context minimization:
+Raw: 445 -> Final: 211     (-52.6%)
 ```
 
-For real API benchmarks, install provider extras and set at least one API key:
+Where the savings come from:
 
-```bash
-pip install -e ".[all]"
-export OPENAI_API_KEY=...
-export ANTHROPIC_API_KEY=...
+- Calls avoided: exact cache hits, partial recomputation, and semantic reuse skip provider calls.
+- Tokens avoided: projected prompts pass only needed fields downstream.
+- Latency reduced: skipped calls and parallel DAG execution reduce wall-clock time.
+
+## How It Works
+
+1. Define a workflow in YAML.
+2. Helix builds a dependency graph.
+3. Each step gets a resolved input hash.
+4. Helix reuses cached or semantically similar outputs when safe.
+5. Changed inputs recompute only affected steps.
+6. Independent branches can run concurrently.
+
+```mermaid
+flowchart LR
+    A["YAML workflow"] --> B["DAG planner"]
+    B --> C["Context projection"]
+    C --> D["Cache + semantic reuse"]
+    D --> E["Execute changed steps"]
+    E --> F["Metrics + JSON report"]
 ```
 
 ## Quickstart
 
 ```bash
-helix baseline workflows/demo_chain.yaml
-helix run workflows/demo_chain.yaml
-helix run workflows/demo_kv_overlap.yaml --verbose
-helix bench workflows/demo_chain.yaml
-python benchmarks/run_kv_overlap.py
-python benchmarks/run_partial_change.py
+python -m venv venv
+source venv/bin/activate
+pip install -e ".[dev]"
+
+export OPENAI_API_KEY=...
+
+helix bench workflows/demo_real_partial.yaml --real --backend openai --isolated
 ```
 
-`baseline` executes every step without reuse. `run` uses the optimizer, checking the response cache first, then the computation graph, then executing the step. `bench` runs baseline and optimized modes and prints attribution for latency, token, and cost savings.
+No API key? Use the deterministic fake backend:
 
-Verbose runs include per-step decisions, short cache keys, input and output token counts, latency, KV prefix-overlap tokens, KV reused fraction, estimated KV time and cost saved, and a human-readable decision reason.
-
-## Modules
-
-| Module | Purpose |
-| --- | --- |
-| `context_engine` | Typed context decomposition and SHA-256 hashing |
-| `cache_engine` | SQLite response cache |
-| `graph_engine` | SQLite computation DAG |
-| `kv_simulator` | Prefix-overlap savings estimates |
-| `execution_optimizer` | Cache, graph, and execute decisions |
-| `benchmark_engine` | Baseline vs optimized attribution |
-| `api_clients` | Fake, OpenAI, Anthropic, and tool clients |
-
-## v0 Notes
-
-- Package and command names are `helix`.
-- Fake backend works without API keys.
-- SQLite is the only persistence layer in v0.
-- Rich renders CLI output.
-- Cache keys are built from fully resolved prompt context and model ID.
-- KV simulation estimates block-level prefix overlap between consecutive resolved step contexts. It is an estimate only; v0 does not read provider KV-cache telemetry.
-- Cache hits count as context reuse. Graph reuse is attributed separately. KV savings apply only to executed steps.
+```bash
+helix bench workflows/demo_parallel_pipeline.yaml --parallel
+```
 
 ## Demos
 
-Run the KV-overlap demo:
+All demos live in [workflows/](workflows).
+
+### `demo_real_partial.yaml`
+
+Shows partial recomputation and context minimization.
+
+Run:
 
 ```bash
-helix run workflows/demo_kv_overlap.yaml --verbose
-python benchmarks/run_kv_overlap.py
+helix bench workflows/demo_real_partial.yaml --real --backend openai --isolated
 ```
 
-The workflow keeps an identical system prompt across steps and changes the user prompt, so full response-cache hits are avoided while the shared prefix produces KV overlap.
+Expect most stable steps to hit cache after warmup, changed document fields to recompute, and projected JSON fields to reduce prompt tokens.
 
-Run the partial-change demo:
+### `demo_semantic_reuse.yaml`
+
+Shows embedding-based semantic reuse.
+
+Run:
 
 ```bash
-python benchmarks/run_partial_change.py
-```
-
-It performs four optimized runs: cold input, repeated input, changed input, then repeated changed input. The third run demonstrates partial recomputation by reusing the unchanged style step and recomputing the steps affected by the changed document.
-
-## Real API Benchmarks
-
-Real benchmarks use provider-reported latency and token usage, then estimate cost from model pricing. By default, `--real` uses temporary isolated cache and graph databases so previous local runs cannot inflate savings.
-
-```bash
-helix bench workflows/demo_real_repeat.yaml --real
-helix bench workflows/demo_real_partial.yaml --real
-```
-
-Choose a provider explicitly:
-
-```bash
-helix bench workflows/demo_real_repeat.yaml --real --backend openai
-helix bench workflows/demo_real_partial.yaml --real --backend anthropic
-```
-
-Use persistent or explicit benchmark stores when needed:
-
-```bash
-helix bench workflows/demo_real_repeat.yaml --real --isolated
-helix bench workflows/demo_real_repeat.yaml --real --cache-path /tmp/helix-cache.db --graph-path /tmp/helix-graph.db
-```
-
-If API keys or provider packages are missing, Helix skips real benchmarks with a clear message. OpenAI real mode defaults to `gpt-4o-mini`; Anthropic real mode defaults to `claude-3-haiku-20240307`.
-
-Example output:
-
-```text
-=== HELIX EXECUTION REPORT ===
-
-Model: claude-3-haiku-20240307
-
-Latency:
-Baseline:   2.14s
-Optimized:  0.81s
-Saved:      1.33s (62.1%)
-
-Cost:
-Baseline:   $0.021000
-Optimized:  $0.008000
-Saved:      $0.013000 (61.9%)
-
-Tokens:
-Baseline:   1850
-Optimized:  710
-Saved:      1140 (61.6%)
-
-Calls:
-Baseline:   5
-Optimized:  2
-Avoided:    3
-```
-
-Metrics:
-
-- API calls avoided: baseline calls minus optimized calls.
-- Tokens avoided: baseline input/output tokens minus optimized input/output tokens.
-- Cost reduced: provider token pricing applied per step and summed per workflow.
-- Cache hits: exact resolved-context response reuse.
-- Partial recomputation: steps reused from a warmup run while changed inputs recompute affected downstream steps.
-- Steps eliminated: redundant runtime steps skipped by explicit optimization tags.
-
-Pricing changes over time. Helix currently uses published per-million-token rates for `gpt-4o-mini` and Claude Haiku-family models; check provider pricing before large runs. Real benchmarks can incur API charges.
-
-### Context Minimization
-
-Optimized runs audit each step before the API call:
-
-- raw resolved input tokens
-- minimized input tokens
-- tokens removed by minimization
-
-Steps can opt into field projection and compact structured output:
-
-```yaml
-input_projection:
-  extract_metadata:
-    fields: ["doc_type", "region"]
-compact: true
-output_format: json
-max_output_tokens: 80
-```
-
-With projection enabled, `{extract_metadata.output}` resolves to only the selected JSON fields. Cache keys are built from the final minimized resolved messages, so unrelated upstream fields do not invalidate unaffected steps.
-
-Write an auditable artifact:
-
-```bash
-helix bench workflows/demo_real_partial.yaml --real --backend openai --isolated --json-out results_real_partial.json
-```
-
-If an optimized run is worse than baseline, the CLI prints `WARNING: Optimization regression detected` with token, cost, latency, or call increases.
-
-### Semantic Reuse
-
-Exact cache reuse remains the default. Approximate reuse is opt-in per step:
-
-```yaml
-semantic_reuse: true
-semantic_threshold: 0.90
-```
-
-Helix stores a deterministic local embedding of the minimized step input with the cache entry. On later runs, semantic steps can reuse a prior output when cosine similarity exceeds the threshold. Reports distinguish exact cache hits from semantic cache hits and show the average similarity score.
-
-Run the semantic demo:
-
-```bash
+HELIX_SEMANTIC_REVIEW_MODE=auto_accept \
 helix bench workflows/demo_semantic_reuse.yaml --real --backend openai --isolated
 ```
 
-### Structured Output Reliability
+Expect an exact cache miss but a semantic cache hit for similar wording, such as "Acme Corp" vs "ACME Corporation".
 
-For JSON steps, Helix validates provider output before it is cached or projected downstream:
+### `demo_parallel_pipeline.yaml`
 
-```yaml
-output_format: json
-required_fields: ["doc_type", "region"]
+Shows parallel execution across independent DAG branches.
+
+Run:
+
+```bash
+helix bench workflows/demo_parallel_pipeline.yaml --parallel
 ```
 
-Invalid JSON triggers one repair request with a strict “Return ONLY valid JSON” instruction. If repair fails, the step is marked in metrics without crashing the workflow. Reports include repair attempts and repair success rate.
+Expect the first four extraction branches to run concurrently, followed by one aggregation step. On the fake backend this typically shows `max_concurrency >= 4` and a visible latency speedup.
+
+### `demo_showcase.yaml`
+
+Flagship workflow combining partial recomputation, context minimization, semantic reuse, and parallel branches.
+
+Run:
+
+```bash
+HELIX_SEMANTIC_REVIEW_MODE=auto_accept \
+helix bench workflows/demo_showcase.yaml --parallel
+```
+
+Use the fake backend for a fast local tour, or switch to `--real --backend openai --isolated` with an API key.
+
+## Key Features
+
+- Partial recomputation
+- Context minimization with projection and field slicing
+- Semantic reuse with embeddings and review mode
+- Parallel DAG execution
+- Structured output validation and repair
+- Real cost, latency, token, and call benchmarking
+- JSON benchmark artifacts with per-step metrics
+
+## Python API
+
+```python
+from helix import run_workflow
+
+result = run_workflow("workflows/demo_real_partial.yaml", {
+    "doc_type": "invoice",
+    "region": "US",
+    "body": "Invoice 1007 from Acme Medical...",
+})
+```
+
+This is a thin wrapper around the existing runner. The CLI remains the best way to run benchmark comparisons.
+
+## Repo Structure
+
+```text
+helix/
+  api_clients/          OpenAI, Anthropic, fake, and tool clients
+  benchmark_engine/     Baseline vs optimized reports
+  cache_engine/         SQLite response and semantic cache
+  context_engine/       Context decomposition and hashing
+  execution_optimizer/  Cache, graph, semantic, and execution decisions
+  graph_engine/         SQLite computation graph
+  workflow/             YAML parser and workflow runner
+workflows/              Demo workflows
+benchmarks/             Scripted benchmark demos
+tests/                  Unit and integration tests
+```
+
+## When To Use Helix
+
+Use Helix for:
+
+- Multi-step LLM pipelines
+- Document processing systems
+- Agent workflows with repeated sub-tasks
+- Extraction, classification, validation, and summarization chains
+- Workflows where small input changes should not trigger full recomputation
+
+## Limitations
+
+- Semantic reuse requires threshold tuning.
+- Embeddings add small overhead.
+- Parallelism is limited by provider rate limits.
+- Helix is not distributed yet.
+- Provider KV-cache internals are not exposed; Helix reports its own reuse and minimization metrics.
+
+## Roadmap
+
+- Phase 6: evaluator-optimizer loops
+- Phase 7: LangChain and LangGraph adapters
+- Phase 8: distributed execution

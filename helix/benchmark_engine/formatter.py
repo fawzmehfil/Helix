@@ -26,6 +26,20 @@ class ReportFormatter:
             return f"Increased: {saved_value} ({abs(saved_pct):.1f}% regression)"
         return f"Saved:     {saved_value} ({saved_pct:.1f}%)"
 
+    def _headline(self, report: AttributionReport) -> str:
+        if report.baseline.estimated_cost_usd == 0:
+            return (
+                f"Helix reduced latency by {report.latency_saved_pct:.1f}%"
+                if report.latency_saved_pct >= 0
+                else "Helix benchmark completed"
+            )
+        return (
+            f"Helix reduced cost by {report.cost_saved_pct:.1f}% "
+            f"and latency by {report.latency_saved_pct:.1f}%"
+            if report.cost_saved_pct >= 0 and report.latency_saved_pct >= 0
+            else "Helix benchmark completed"
+        )
+
     def format_attribution(self, report: AttributionReport) -> str:
         """Returns the terminal report string."""
         out = StringIO()
@@ -33,6 +47,8 @@ class ReportFormatter:
         console.print("╔══════════════════════════════════════════════════════╗")
         console.print("║           Helix Benchmark Results                    ║")
         console.print("╚══════════════════════════════════════════════════════╝")
+        console.print()
+        console.print(self._headline(report))
         console.print()
         console.print(f"Workflow:      {report.baseline.workflow_id}")
         console.print("Backend:       fake / fake")
@@ -134,6 +150,8 @@ class ReportFormatter:
         console = Console(file=out, force_terminal=False, width=100)
         model = next((step.model for step in report.baseline.per_step if step.model != "unknown"), "unknown")
         console.print("=== HELIX EXECUTION REPORT ===")
+        console.print()
+        console.print(self._headline(report))
         console.print()
         console.print(f"Model: {model}")
         console.print()

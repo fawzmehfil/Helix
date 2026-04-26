@@ -6,6 +6,7 @@ metadata:
   measured_inputs:
     document: "Acme Medical invoice 1007 lists imaging sensors, calibration service, a rush delivery flag, two named approvers, and a net-15 payment term."
 steps:
+  # These four branches have no dependencies, so --parallel runs them together.
   - step_id: extract_metadata
     step_type: llm_call
     cacheable: false
@@ -42,6 +43,7 @@ steps:
         content: "Extract concise named entities."
       - role: user
         content: "{document}"
+  # Aggregation waits until every extraction branch has completed.
   - step_id: aggregate_report
     step_type: llm_call
     cacheable: false

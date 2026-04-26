@@ -8,6 +8,8 @@ metadata:
   measured_inputs:
     request: "Summarize invoice for ACME Corporation"
 steps:
+  # Semantic reuse is opt-in. The warmup and measured requests are phrased differently
+  # but should land above the similarity threshold.
   - step_id: summarize_invoice
     step_type: llm_call
     semantic_reuse: true
