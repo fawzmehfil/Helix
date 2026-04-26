@@ -1,5 +1,8 @@
 # Helix: An Execution Engine for AI Workloads
 
+<div align="center">
+  <img src="assets/helix.png" alt="logo" width="220" />
+</div>
 
 Helix is "Bazel for LLM workloads": it tracks dependencies, stores intermediate computations, recomputes only what changed, and optimizes execution across model calls.
 
