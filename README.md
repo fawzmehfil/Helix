@@ -1,8 +1,5 @@
 # Helix: A Compiler for Efficient LLM Execution
 
-[![Tests](https://img.shields.io/badge/tests-passing-brightgreen)](#quickstart)
-[![Python](https://img.shields.io/badge/python-3.11%2B-blue)](pyproject.toml)
-[![CLI](https://img.shields.io/badge/CLI-helix-black)](helix/cli)
 
 Helix reduces LLM cost and latency by 50-90% by reusing previous computations, minimizing context, and executing workflows efficiently.
 
@@ -52,15 +49,6 @@ Where the savings come from:
 4. Helix reuses cached or semantically similar outputs when safe.
 5. Changed inputs recompute only affected steps.
 6. Independent branches can run concurrently.
-
-```mermaid
-flowchart LR
-    A["YAML workflow"] --> B["DAG planner"]
-    B --> C["Context projection"]
-    C --> D["Cache + semantic reuse"]
-    D --> E["Execute changed steps"]
-    E --> F["Metrics + JSON report"]
-```
 
 ## Quickstart
 
