@@ -1,8 +1,5 @@
 # Helix: An Execution Engine for AI Workloads
 
-[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
-[![Tests](https://img.shields.io/badge/tests-pytest-green.svg)](tests/)
-[![CLI](https://img.shields.io/badge/cli-helix-black.svg)](helix/cli/)
 
 Helix is "Bazel for LLM workloads": it tracks dependencies, stores intermediate computations, recomputes only what changed, and optimizes execution across model calls.
 
@@ -66,117 +63,6 @@ Observed ranges depend heavily on workload structure. Realistic multi-node workl
 ## Execution Model
 
 Helix execution is a dependency graph:
-
-```mermaid
-flowchart LR
-  A["extract_metadata"] --> C["classify_content"]
-  A --> D["quality_check"]
-  B["extract_entities"] --> E["aggregate_report"]
-  C --> E
-  D --> E
-```
-
-Each execution node has:
-
-- dependencies
-- resolved inputs
-- model/backend config
-- versioned output
-- exact cache key
-- optional semantic embedding
-
-Dependency invalidation is deterministic. If an upstream output changes, only nodes whose resolved inputs change are recomputed. Projection narrows invalidation further: a node that only references `doc_type` and `region` is not invalidated by unrelated fields in the same upstream JSON output.
-
-Semantic reuse is approximate reuse. It is opt-in per node and guarded by a similarity threshold plus review mode settings.
-
-## Computation Store
-
-Helix treats cache as a first-class computation store.
-
-Exact cache:
-
-- hash-based
-- keyed by finalized resolved input, model, and relevant execution config
-- correctness-first
-
-Semantic cache:
-
-- embedding-based
-- stores minimized input text, embedding vector, output, model, and timestamp
-- enabled only for nodes marked `semantic_reuse: true`
-- uses cosine similarity and a configurable threshold
-
-Cache correctness is prioritized over aggressiveness. Helix does not assume cross-workload reuse unless the resolved computation matches or semantic reuse is explicitly enabled.
-
-## Cache Invalidation Strategy
-
-Cache keys are derived from fully resolved node inputs after projection and context minimization decisions are applied. This means the key represents the actual computation sent to the model.
-
-Invalidation behavior:
-
-- changed referenced input -> affected node recomputes
-- unchanged referenced input -> node can reuse
-- changed unrelated branch -> unaffected nodes keep their cache entries
-- selected dependency fields narrow the invalidation boundary
-- semantic reuse is separate from exact invalidation and must be opted in
-
-This lets Helix recompute the smallest deterministic subgraph rather than the entire AI workload.
-
-## Execution Backends
-
-Helix treats models as interchangeable execution units. The optimizer is independent of generation quality; it optimizes which computations need to happen, not what the model should say.
-
-Supported backends:
-
-```bash
-helix bench workflows/incremental_execution_demo.yaml --real --backend openai --isolated
-helix bench workflows/incremental_execution_demo.yaml --real --backend anthropic --isolated
-```
-
-Environment variables:
-
-```bash
-export OPENAI_API_KEY=...
-export ANTHROPIC_API_KEY=...
-```
-
-If API keys are missing, real benchmarks skip with a clear message. The fake backend remains deterministic and requires no API keys.
-
-## Execution Modes
-
-Baseline:
-
-- executes every node
-- no optimization
-- used as a comparison point
-
-Optimized:
-
-- exact computation reuse
-- partial recomputation
-- context minimization
-- structured output validation
-
-Parallel:
-
-- enabled with `--parallel`
-- schedules independent ready nodes concurrently
-- reports critical path latency and speedup
-
-Semantic-enabled:
-
-- enabled per execution node with `semantic_reuse: true`
-- uses embedding similarity for approximate reuse
-- review mode defaults to non-interactive `auto_accept`
-
-Semantic review can be controlled with:
-
-```bash
-export HELIX_SEMANTIC_REVIEW_MODE=auto_accept
-helix bench workflows/semantic_execution_demo.yaml --semantic-review auto_reject
-```
-
-Supported values are `auto_accept`, `auto_reject`, and `interactive`.
 
 ## Quickstart
 
