@@ -32,6 +32,43 @@ def test_json_out_writes_benchmark_artifact(tmp_path):
     assert "context_minimization" in payload
 
 
+def test_bench_default_output_is_concise():
+    result = CliRunner().invoke(cli, ["bench", "workflows/demo_chain.yaml"])
+
+    assert result.exit_code == 0
+    assert "=== HELIX REPORT ===" in result.output
+    assert "Computation store:" in result.output
+    assert "Execution metrics:" in result.output
+    assert "Helix Benchmark Results" not in result.output
+
+
+def test_bench_show_graph_outputs_execution_graph():
+    result = CliRunner().invoke(
+        cli,
+        ["bench", "workflows/parallel_execution_demo.yaml", "--parallel", "--show-graph"],
+    )
+
+    assert result.exit_code == 0
+    assert "Execution graph:" in result.output
+    assert "Parallel groups:" in result.output
+    assert "Node decisions:" in result.output
+    assert "extract_metadata -> aggregate_report" in result.output
+
+
+def test_bench_verbose_output_keeps_detailed_report():
+    result = CliRunner().invoke(cli, ["bench", "workflows/demo_chain.yaml", "--verbose"])
+
+    assert result.exit_code == 0
+    assert "Helix Benchmark Results" in result.output
+
+
+def test_semantic_review_default_does_not_prompt():
+    result = CliRunner().invoke(cli, ["bench", "workflows/demo_semantic_reuse.yaml"])
+
+    assert result.exit_code == 0
+    assert "Decision [accept/reject]" not in result.output
+
+
 def test_isolated_flags_are_accepted_without_real_keys(monkeypatch, tmp_path):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)

@@ -36,6 +36,54 @@ def _force_workflow_model(workflow, model: str) -> None:
         step.model = model
 
 
+def _topological_groups(workflow) -> list[list[str]]:
+    step_ids = [step.step_id for step in workflow.steps]
+    remaining = set(step_ids)
+    completed: set[str] = set()
+    groups: list[list[str]] = []
+    dependencies = {
+        step.step_id: [dep for dep in step.depends_on if dep in remaining]
+        for step in workflow.steps
+    }
+    while remaining:
+        ready = sorted(
+            step_id
+            for step_id in remaining
+            if all(dep in completed for dep in dependencies.get(step_id, []))
+        )
+        if not ready:
+            groups.append(sorted(remaining))
+            break
+        groups.append(ready)
+        completed.update(ready)
+        remaining.difference_update(ready)
+    return groups
+
+
+def _format_graph_visibility(workflow, result) -> str:
+    decisions = {step.step_id: step.decision.value for step in result.per_step}
+    lines = ["Execution graph:"]
+    edges: list[str] = []
+    roots: list[str] = []
+    for step in workflow.steps:
+        if step.depends_on:
+            edges.extend(f"{dep} -> {step.step_id}" for dep in step.depends_on)
+        else:
+            roots.append(step.step_id)
+    if roots:
+        lines.append("roots: " + ", ".join(sorted(roots)))
+    lines.extend(sorted(edges) if edges else ["(single-node graph)"])
+    lines.append("")
+    lines.append("Parallel groups:")
+    for group in _topological_groups(workflow):
+        lines.append("[" + ", ".join(group) + "]")
+    lines.append("")
+    lines.append("Node decisions:")
+    for step in workflow.steps:
+        lines.append(f"- {step.step_id}: {decisions.get(step.step_id, 'not_recorded')}")
+    return "\n".join(lines)
+
+
 def _step_json(step) -> dict:
     return {
         "step_id": step.step_id,
@@ -189,6 +237,13 @@ def _write_json_report(path: str, report, backend: str, model: str) -> None:
 @click.option("--graph-path", default=None, help="Graph database path for this benchmark.")
 @click.option("--json-out", default=None, help="Write benchmark results to a JSON artifact.")
 @click.option("--parallel", is_flag=True, help="Run optimized workflow with DAG-level parallel execution.")
+@click.option("--show-graph", is_flag=True, help="Show execution graph, parallel groups, and node decisions.")
+@click.option(
+    "--semantic-review",
+    default=None,
+    type=click.Choice(["auto_accept", "auto_reject", "interactive"]),
+    help="Override semantic reuse review mode.",
+)
 def bench_cmd(
     workflow_path: str,
     inputs: tuple[str, ...],
@@ -200,8 +255,10 @@ def bench_cmd(
     graph_path: str | None,
     json_out: str | None,
     parallel: bool,
+    show_graph: bool,
+    semantic_review: str | None,
 ) -> None:
-    """Run baseline vs optimized benchmark."""
+    """Benchmark workload execution with and without Helix optimization."""
     workflow = WorkflowParser().parse_file(workflow_path)
     parsed_inputs = parse_inputs(inputs)
     temp_state = None
@@ -239,6 +296,8 @@ def bench_cmd(
                 model=model,
                 require_available=True,
             )
+            if semantic_review:
+                optimized.optimizer.semantic_review_mode = semantic_review
             measured_inputs = parsed_inputs or _metadata_inputs(workflow, "measured_inputs")
             warmup_inputs = _metadata_inputs(workflow, "warmup_inputs") or measured_inputs
             runner = BenchmarkRunner(
@@ -250,19 +309,35 @@ def bench_cmd(
                 report = runner.run_parallel_comparison(workflow, measured_inputs)
             else:
                 report = runner.run_real_comparison(workflow, measured_inputs, warmup_inputs)
-            console.print(ReportFormatter().format_real_benchmark(report))
+            formatter = ReportFormatter()
+            console.print(
+                formatter.format_real_benchmark(report)
+                if verbose
+                else formatter.format_concise_report(report)
+            )
+            if show_graph:
+                console.print(_format_graph_visibility(workflow, report.optimized), markup=False)
             if json_out:
                 _write_json_report(json_out, report, selected_backend, model)
         else:
             baseline = build_runner(backend, baseline=True, cache_path=cache_path, graph_path=graph_path)
             optimized = build_runner(backend, baseline=False, cache_path=cache_path, graph_path=graph_path)
+            if semantic_review:
+                optimized.optimizer.semantic_review_mode = semantic_review
             runner = BenchmarkRunner(baseline, optimized, HelixConfig.default().cost_table)
             report = (
                 runner.run_parallel_comparison(workflow, parsed_inputs)
                 if parallel
                 else runner.run_comparison(workflow, parsed_inputs)
             )
-            console.print(ReportFormatter().format_attribution(report))
+            formatter = ReportFormatter()
+            console.print(
+                formatter.format_attribution(report)
+                if verbose
+                else formatter.format_concise_report(report)
+            )
+            if show_graph:
+                console.print(_format_graph_visibility(workflow, report.optimized), markup=False)
             if json_out:
                 model = report.baseline.per_step[0].model if report.baseline.per_step else backend
                 _write_json_report(json_out, report, backend, model)
@@ -272,6 +347,3 @@ def bench_cmd(
     finally:
         if temp_state is not None:
             temp_state.cleanup()
-    if verbose:
-        for step in report.optimized.per_step:
-            console.print(f"{step.step_id}: {step.decision.value}")

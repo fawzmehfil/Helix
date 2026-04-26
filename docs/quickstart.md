@@ -6,77 +6,81 @@ Install Helix in editable mode:
 pip install -e ".[dev]"
 ```
 
-Run the local deterministic workflow:
+Run a deterministic local execution benchmark:
 
 ```bash
-helix baseline workflows/demo_chain.yaml
-helix run workflows/demo_chain.yaml
-helix bench workflows/demo_chain.yaml
+helix baseline workflows/incremental_execution_demo.yaml
+helix run workflows/incremental_execution_demo.yaml
+helix bench workflows/incremental_execution_demo.yaml
 ```
 
-The fake backend requires no API keys and produces stable SHA-256 responses for repeatable benchmarks.
+The fake backend requires no API keys and produces stable responses for repeatable local checks.
 
-## Baseline vs Optimized
+## Baseline vs Optimized Execution
 
-Use baseline mode to measure full execution:
+Baseline mode executes every node:
 
 ```bash
-helix baseline workflows/demo_chain.yaml
+helix baseline workflows/incremental_execution_demo.yaml
 ```
 
-Use optimized mode to reuse prior work:
+Optimized mode uses the computation store and incremental recomputation:
 
 ```bash
-helix run workflows/demo_chain.yaml
+helix run workflows/incremental_execution_demo.yaml
 ```
 
-Compare both modes:
+Benchmark both modes:
 
 ```bash
-helix bench workflows/demo_chain.yaml
+helix bench workflows/incremental_execution_demo.yaml
 ```
 
-The benchmark report separates cache reuse, graph reuse, KV simulation, and remaining step reduction. Cache hits count toward context reuse. Graph reuse is counted separately. KV simulation contributes only when a step still executes.
+The report separates call-level savings, exact cache reuse, semantic reuse, context minimization, and parallel execution metrics.
 
-## KV Overlap Demo
+## Execution Graph Visibility
+
+Show dependency edges, parallel groups, and node decisions:
 
 ```bash
-helix run workflows/demo_kv_overlap.yaml --verbose
-python benchmarks/run_kv_overlap.py
+helix bench workflows/parallel_execution_demo.yaml --parallel --show-graph
 ```
 
-The demo uses the same system prompt across steps and different user prompts. That prevents full cache hits while still producing block-level prefix overlap for the KV simulator.
+## Real Backends
 
-Verbose output includes:
-
-- step ID
-- execution decision
-- short cache key
-- input and output tokens
-- latency
-- KV prefix-overlap tokens
-- KV reused fraction
-- estimated KV time and cost saved
-- decision reason
-
-## Partial-Change Demo
+OpenAI and Anthropic are interchangeable execution backends:
 
 ```bash
-python benchmarks/run_partial_change.py
+export OPENAI_API_KEY=...
+helix bench workflows/incremental_execution_demo.yaml --real --backend openai --isolated
+
+export ANTHROPIC_API_KEY=...
+helix bench workflows/incremental_execution_demo.yaml --real --backend anthropic --isolated
 ```
 
-The script runs four cases:
+Real benchmarks skip cleanly when API keys are missing.
 
-1. Run 1: cold input, execute all steps.
-2. Run 2: same input, cache hits.
-3. Run 3: changed input, partial recompute.
-4. Run 4: same changed input, cache hits.
+## Demo Execution Graphs
 
-It prints a comparison table with run number, input version, steps executed, cache hits, graph reuse, tokens, and latency.
+- `incremental_execution_demo.yaml`: incremental recomputation and projection-based invalidation narrowing
+- `semantic_execution_demo.yaml`: embedding-based approximate reuse
+- `parallel_execution_demo.yaml`: DAG scheduling with `--parallel`
+- `demo_execution_engine_showcase.yaml`: combined showcase
+- `demo_low_reuse.yaml`: failure case with little reuse
+- `demo_minimization_regression.yaml`: failure case where tiny prompts expose minimization overhead
+
+## JSON Artifacts
+
+```bash
+helix bench workflows/incremental_execution_demo.yaml --json-out results.json
+```
+
+Artifacts include baseline totals, optimized totals, per-node metrics, context minimization, semantic reuse, structured output repair, parallel metrics, warnings, and notes.
 
 ## Current Limitations
 
-- v0 persistence is SQLite only.
-- KV savings are simulated from resolved context block overlap, not provider-side KV telemetry.
-- The fake backend is deterministic and useful for local benchmarking, but it does not model provider-specific latency variance.
-- Cache and graph reuse are exact-hash based; semantic equivalence is outside v0 scope.
+- Semantic reuse requires threshold tuning.
+- Provider embeddings add small overhead.
+- Parallelism is bounded by provider rate limits and dependency graph shape.
+- Provider-side KV reuse is simulated, not directly controlled.
+- Distributed execution is not implemented yet.

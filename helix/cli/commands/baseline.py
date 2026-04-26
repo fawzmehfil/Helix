@@ -14,12 +14,12 @@ from helix.workflow import WorkflowParser
 @click.option("--inputs", multiple=True, help="Template input as key=value.")
 @click.option("--backend", default="fake", type=click.Choice(["fake", "openai", "anthropic"]))
 def baseline_cmd(workflow_path: str, inputs: tuple[str, ...], backend: str) -> None:
-    """Run a workflow without optimizations."""
+    """Execute an AI workload without optimizations."""
     workflow = WorkflowParser().parse_file(workflow_path)
     runner = build_runner(backend, baseline=True)
     result = runner.run(workflow, parse_inputs(inputs))
     table = Table(title=f"Helix baseline: {workflow.workflow_id}")
-    table.add_column("Step")
+    table.add_column("Node")
     table.add_column("Decision")
     table.add_column("Input")
     table.add_column("Output")
@@ -27,4 +27,3 @@ def baseline_cmd(workflow_path: str, inputs: tuple[str, ...], backend: str) -> N
     for step in result.step_results:
         table.add_row(step.step_id, step.decision.value, str(step.input_tokens), str(step.output_tokens), f"{step.latency_ms:.0f}ms")
     console.print(table)
-

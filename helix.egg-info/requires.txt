@@ -3,7 +3,7 @@ pyyaml>=6.0
 rich>=13.0
 
 [all]
-helix[anthropic,dev,openai]
+helix[anthropic,dev,embeddings,openai]
 
 [anthropic]
 anthropic>=0.25
@@ -14,5 +14,9 @@ pytest-cov
 mypy
 ruff
 
+[embeddings]
+sentence-transformers>=2.7
+
 [openai]
 openai>=1.0
+tiktoken>=0.7

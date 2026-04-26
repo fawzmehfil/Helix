@@ -1,0 +1,57 @@
+workflow_id: demo_low_reuse_v1
+name: "Low Reuse Workload"
+description: "Failure case: each step sees unique context and cache reuse is disabled to show minimal Helix benefit."
+default_model: gpt-4o-mini
+metadata:
+  measured_inputs:
+    incident_a: "New customer escalation about a delayed oncology device shipment in Canada."
+    incident_b: "Unrelated vendor security questionnaire for a European analytics provider."
+    incident_c: "Procurement note about office network equipment renewal in Singapore."
+steps:
+  # Unique context, no repeated dependency, and no cache reuse.
+  - step_id: analyze_incident_a
+    step_type: llm_call
+    cacheable: false
+    max_output_tokens: 70
+    messages:
+      - role: system
+        content: "Analyze this operational incident in one paragraph."
+      - role: user
+        content: "{incident_a}"
+
+  # Another unrelated input: Helix should not manufacture reuse.
+  - step_id: analyze_incident_b
+    step_type: llm_call
+    cacheable: false
+    max_output_tokens: 70
+    messages:
+      - role: system
+        content: "Analyze this operational incident in one paragraph."
+      - role: user
+        content: "{incident_b}"
+
+  # Third unrelated branch.
+  - step_id: analyze_incident_c
+    step_type: llm_call
+    cacheable: false
+    max_output_tokens: 70
+    messages:
+      - role: system
+        content: "Analyze this operational incident in one paragraph."
+      - role: user
+        content: "{incident_c}"
+
+  # Aggregation still runs, but no upstream reuse should occur.
+  - step_id: aggregate_unique_findings
+    step_type: llm_call
+    cacheable: false
+    depends_on:
+      - analyze_incident_a
+      - analyze_incident_b
+      - analyze_incident_c
+    max_output_tokens: 90
+    messages:
+      - role: system
+        content: "Combine the three unrelated analyses."
+      - role: user
+        content: "a={analyze_incident_a.output}; b={analyze_incident_b.output}; c={analyze_incident_c.output}"

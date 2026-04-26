@@ -1,0 +1,129 @@
+workflow_id: incremental_execution_demo_v1
+name: "Incremental Execution Demo"
+description: "Document workload where Helix reuses unchanged execution nodes and recomputes only the changed branch."
+default_model: claude-3-haiku-20240307
+metadata:
+  warmup_inputs:
+    doc_type: "invoice"
+    region: "US"
+    body: "Invoice 1007 from Acme Medical for two imaging sensors and one calibration visit. Payment is due in thirty days."
+  measured_inputs:
+    doc_type: "invoice"
+    region: "US"
+    body: "Invoice 1007 from Acme Medical for three imaging sensors and one calibration visit. Payment is due in fifteen days."
+steps:
+  # Stable execution node: metadata depends only on doc_type and region.
+  - step_id: extract_metadata
+    step_type: llm_call
+    compact: true
+    output_format: json
+    required_fields: ["doc_type", "region"]
+    output_schema:
+      type: object
+      properties:
+        doc_type: {type: string}
+        region: {type: string}
+        priority: {type: string}
+        owner: {type: string}
+        irrelevant_notes: {type: string}
+      required: ["doc_type", "region", "priority", "owner", "irrelevant_notes"]
+    max_output_tokens: 60
+    messages:
+      - role: system
+        content: "Extract document metadata."
+      - role: user
+        content: "Return JSON doc_type, region, priority, owner, and irrelevant_notes for doc_type={doc_type}, region={region}."
+
+  # Projection narrows invalidation to doc_type and region.
+  - step_id: classify_document
+    step_type: llm_call
+    depends_on: [extract_metadata]
+    input_projection:
+      extract_metadata:
+        fields: ["doc_type", "region"]
+    compact: true
+    output_format: json
+    required_fields: ["category", "confidence"]
+    output_schema:
+      type: object
+      properties:
+        category: {type: string}
+        confidence: {type: number}
+        routing_explanation: {type: string}
+      required: ["category", "confidence", "routing_explanation"]
+    max_output_tokens: 60
+    messages:
+      - role: system
+        content: "Classify a business document."
+      - role: user
+        content: "Return JSON category and confidence for doc_type={extract_metadata.output.doc_type}; region={extract_metadata.output.region}."
+
+  # Changed execution node: body edits invalidate this branch.
+  - step_id: extract_line_items
+    step_type: llm_call
+    compact: true
+    output_format: json
+    required_fields: ["items", "due_days"]
+    output_schema:
+      type: object
+      properties:
+        items:
+          type: array
+          items: {type: string}
+        due_days: {type: integer}
+        changed_section: {type: string}
+        audit_notes: {type: string}
+      required: ["items", "due_days", "changed_section", "audit_notes"]
+    max_output_tokens: 80
+    messages:
+      - role: system
+        content: "Extract changed line-item facts."
+      - role: user
+        content: "Return JSON items, due_days, changed_section, and audit_notes from: {body}"
+
+  # Stable validation node reuses projected dependency fields.
+  - step_id: qc_static_fields
+    step_type: llm_call
+    depends_on: [extract_metadata, classify_document]
+    input_projection:
+      extract_metadata:
+        fields: ["doc_type", "region"]
+      classify_document:
+        fields: ["category", "confidence"]
+    compact: true
+    output_format: json
+    required_fields: ["valid", "reason"]
+    output_schema:
+      type: object
+      properties:
+        valid: {type: boolean}
+        reason: {type: string}
+      required: ["valid", "reason"]
+    max_output_tokens: 60
+    messages:
+      - role: system
+        content: "Validate stable routing fields."
+      - role: user
+        content: "Return JSON valid and reason for doc_type={extract_metadata.output.doc_type}; region={extract_metadata.output.region}; category={classify_document.output.category}; confidence={classify_document.output.confidence}."
+
+  # Final node receives only changed line-item fields.
+  - step_id: summarize_change
+    step_type: llm_call
+    depends_on: [extract_line_items]
+    input_projection:
+      extract_line_items:
+        fields: ["items", "due_days"]
+    compact: true
+    output_format: json
+    required_fields: ["summary"]
+    output_schema:
+      type: object
+      properties:
+        summary: {type: string}
+      required: ["summary"]
+    max_output_tokens: 60
+    messages:
+      - role: system
+        content: "Summarize invoice processing changes."
+      - role: user
+        content: "Return JSON summary for items={extract_line_items.output.items}; due_days={extract_line_items.output.due_days}."
