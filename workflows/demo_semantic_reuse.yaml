@@ -12,7 +12,6 @@ steps:
     step_type: llm_call
     semantic_reuse: true
     semantic_threshold: 0.90
-    compact: true
     max_output_tokens: 60
     messages:
       - role: system

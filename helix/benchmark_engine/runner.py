@@ -34,7 +34,7 @@ class BenchmarkRunner:
                 conn.execute("DELETE FROM graph_nodes")
 
     def _result_from_run(self, run, collector: BenchmarkCollector, mode: str) -> BenchmarkResult:
-        return collector.finalize(run.run_id, run.workflow_id, mode, run.optimization_plan, self.cost_table)
+        return collector.finalize(run.run_id, run.workflow_id, mode, run.optimization_plan, self.cost_table, run)
 
     def _pct(self, saved: float, baseline: float) -> float:
         return (saved / baseline * 100.0) if baseline else 0.0
@@ -64,13 +64,24 @@ class BenchmarkRunner:
                 f"optimized calls exceeded baseline by "
                 f"{self._increase_pct(optimized.calls, baseline.calls):.1f}%"
             )
-        if optimized.optimization_overhead_tokens > optimized.tokens_removed_by_projection:
+        if optimized.net_tokens_saved_by_minimization < 0:
             warnings.append(
-                "minimization overhead exceeded savings "
-                f"({optimized.optimization_overhead_tokens} overhead vs "
-                f"{optimized.tokens_removed_by_projection} removed)"
+                "context minimization net negative "
+                f"({optimized.net_tokens_saved_by_minimization} tokens)"
             )
-        warnings.extend(optimized.minimization_warnings)
+        return self._dedupe(warnings)
+
+    def _minimization_notes(self, optimized: BenchmarkResult) -> list[str]:
+        notes = [
+            f"{step.step_id}: context minimization net negative "
+            f"({step.net_tokens_saved_by_minimization} tokens)"
+            for step in optimized.per_step
+            if step.decision == ExecutionDecisionType.EXECUTE
+            and step.net_tokens_saved_by_minimization < 0
+        ]
+        return self._dedupe(notes)
+
+    def _dedupe(self, warnings: list[str]) -> list[str]:
         deduped: list[str] = []
         for warning in warnings:
             if warning not in deduped:
@@ -159,6 +170,82 @@ class BenchmarkRunner:
             semantic_calls_avoided=semantic_calls,
             semantic_tokens_avoided=semantic_tokens,
             warnings=self._regression_warnings(baseline, optimized),
+            notes=self._minimization_notes(optimized),
+        )
+        report.validate()
+        return report
+
+    def run_parallel_comparison(self, workflow: Workflow, inputs: dict[str, str]) -> AttributionReport:
+        """Run sequential baseline against optimized parallel execution."""
+        self._clear_store()
+        self.baseline_runner.benchmark_collector = BenchmarkCollector()
+        baseline_run = self.baseline_runner.run(workflow, inputs)
+        baseline = self._result_from_run(
+            baseline_run, self.baseline_runner.benchmark_collector, "baseline"
+        )
+        self.optimized_runner.benchmark_collector = BenchmarkCollector()
+        optimized_run = self.optimized_runner.run_parallel(workflow, inputs)
+        optimized = self._result_from_run(
+            optimized_run, self.optimized_runner.benchmark_collector, "optimized"
+        )
+        return self._build_report(baseline, optimized)
+
+    def _build_report(self, baseline: BenchmarkResult, optimized: BenchmarkResult) -> AttributionReport:
+        latency_saved = baseline.total_latency_ms - optimized.total_latency_ms
+        cost_saved = baseline.estimated_cost_usd - optimized.estimated_cost_usd
+        tokens_saved = baseline.total_tokens - optimized.total_tokens
+        steps_reduced = baseline.steps_executed - optimized.steps_executed
+        context_tokens = sum(
+            base.input_tokens + base.output_tokens
+            for base, opt in zip(baseline.per_step, optimized.per_step)
+            if opt.cache_hit
+        )
+        graph_tokens = sum(
+            base.input_tokens + base.output_tokens
+            for base, opt in zip(baseline.per_step, optimized.per_step)
+            if opt.graph_reuse
+        )
+        semantic_tokens = sum(
+            base.input_tokens + base.output_tokens
+            for base, opt in zip(baseline.per_step, optimized.per_step)
+            if opt.semantic_cache_hit
+        )
+        semantic_calls = sum(1 for opt in optimized.per_step if opt.semantic_cache_hit)
+        skipped_tokens = sum(
+            base.input_tokens + base.output_tokens
+            for base, opt in zip(baseline.per_step, optimized.per_step)
+            if opt.decision != ExecutionDecisionType.EXECUTE
+        )
+        if tokens_saved <= 0 or cost_saved < 0 or latency_saved <= 0:
+            context = 0.0
+            graph_pct = 0.0
+            step_reduction = 0.0
+        else:
+            context = context_tokens / baseline.total_tokens * 100.0 if baseline.total_tokens else 0.0
+            graph_pct = graph_tokens / baseline.total_tokens * 100.0 if baseline.total_tokens else 0.0
+            step_reduction = max(0.0, 100.0 - context - graph_pct)
+        report = AttributionReport(
+            baseline=baseline,
+            optimized=optimized,
+            latency_saved_ms=latency_saved,
+            latency_saved_pct=self._pct(latency_saved, baseline.total_latency_ms),
+            cost_saved_usd=cost_saved,
+            cost_saved_pct=self._pct(cost_saved, baseline.estimated_cost_usd),
+            tokens_saved=tokens_saved,
+            tokens_saved_pct=self._pct(tokens_saved, baseline.total_tokens),
+            steps_reduced=steps_reduced,
+            calls_avoided=baseline.calls - optimized.calls,
+            tokens_avoided=skipped_tokens,
+            steps_eliminated=optimized.steps_skipped,
+            partial_recomputation_steps=optimized.steps_cached + optimized.steps_graph_reused,
+            context_reuse_pct=context,
+            kv_simulation_pct=0.0,
+            graph_reuse_pct=graph_pct,
+            step_reduction_pct=step_reduction,
+            semantic_calls_avoided=semantic_calls,
+            semantic_tokens_avoided=semantic_tokens,
+            warnings=self._regression_warnings(baseline, optimized),
+            notes=self._minimization_notes(optimized),
         )
         report.validate()
         return report
@@ -254,6 +341,7 @@ class BenchmarkRunner:
             semantic_calls_avoided=semantic_calls,
             semantic_tokens_avoided=semantic_tokens,
             warnings=self._regression_warnings(baseline, optimized),
+            notes=self._minimization_notes(optimized),
         )
         report.validate()
         return report

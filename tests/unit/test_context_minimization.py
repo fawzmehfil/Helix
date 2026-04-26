@@ -287,3 +287,35 @@ steps:
     assert step.budget_applied is False
     assert step.tokens_trimmed_by_budget == 0
     assert step.minimized_messages[1]["content"] == "one two three four five six seven eight nine ten eleven"
+
+
+def test_projection_ineffective_warning_still_appears_when_projection_declared():
+    workflow = WorkflowParser().parse_yaml(
+        """
+workflow_id: projection_warning_test
+name: Projection Warning Test
+steps:
+  - step_id: seed
+    step_type: tool_call
+    model: fake
+    tool_name: echo
+    tool_args:
+      doc_type: "invoice"
+  - step_id: s
+    step_type: llm_call
+    model: fake
+    depends_on: [seed]
+    input_projection:
+      seed:
+        fields: ["doc_type"]
+    messages:
+      - role: user
+        content: "Use {seed.output}"
+"""
+    )
+    runner = build_runner("fake", baseline=False)
+
+    result = runner.run(workflow, {})
+    step = result.step_results[1]
+
+    assert "Projection ineffective: no reduction in context" in step.minimization_warnings

@@ -6,6 +6,7 @@ from helix.workflow import WorkflowParser
 def test_semantically_similar_input_reuses_cached_output():
     workflow = WorkflowParser().parse_file("workflows/demo_semantic_reuse.yaml")
     runner = build_runner("fake", baseline=False)
+    runner.optimizer.semantic_review_mode = "auto_accept"
     runner.optimizer.cache_store.clear()
 
     first = runner.run(workflow, {"request": "Summarize invoice for Acme Corp"})
@@ -20,6 +21,7 @@ def test_semantically_similar_input_reuses_cached_output():
 def test_dissimilar_input_does_not_semantic_reuse():
     workflow = WorkflowParser().parse_file("workflows/demo_semantic_reuse.yaml")
     runner = build_runner("fake", baseline=False)
+    runner.optimizer.semantic_review_mode = "auto_accept"
     runner.optimizer.cache_store.clear()
 
     runner.run(workflow, {"request": "Summarize invoice for Acme Corp"})

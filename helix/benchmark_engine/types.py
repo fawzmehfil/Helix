@@ -38,12 +38,22 @@ class BenchmarkResult:
     tokens_saved_by_minimization: int
     net_token_change: int
     semantic_cache_hits: int
+    semantic_reuse_accepted: int
+    semantic_reuse_rejected: int
     avg_similarity_score: float
+    embedding_latency_ms: float
+    embedding_calls: int
     repair_attempts: int
     repair_successes: int
     schema_validation_failures: int
     per_step: list[StepResult]
     timestamp: dt.datetime
+    sequential_estimated_latency_ms: float = 0.0
+    actual_parallel_latency_ms: float = 0.0
+    critical_path_latency_ms: float = 0.0
+    parallel_speedup_factor: float = 1.0
+    max_concurrency: int = 1
+    parallel_steps_executed: int = 0
 
 
 @dataclass
@@ -70,6 +80,7 @@ class AttributionReport:
     semantic_calls_avoided: int = 0
     semantic_tokens_avoided: int = 0
     warnings: list[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
 
     def validate(self) -> None:
         """Assert percentages sum to ~100%."""

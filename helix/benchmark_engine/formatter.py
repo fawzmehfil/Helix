@@ -102,11 +102,30 @@ class ReportFormatter:
             console.print("  Effective:               no")
         else:
             console.print("  Effective:               yes")
+        if report.optimized.max_concurrency > 1:
+            console.print()
+            console.print("Parallel execution:")
+            console.print(
+                f"  Sequential estimate:     {report.optimized.sequential_estimated_latency_ms:.0f}ms"
+            )
+            console.print(
+                f"  Parallel latency:        {report.optimized.actual_parallel_latency_ms:.0f}ms"
+            )
+            console.print(
+                f"  Critical path:           {report.optimized.critical_path_latency_ms:.0f}ms"
+            )
+            console.print(f"  Speedup:                 {report.optimized.parallel_speedup_factor:.2f}x")
+            console.print(f"  Max concurrency:         {report.optimized.max_concurrency}")
         if report.warnings:
             console.print()
             console.print("WARNING: Optimization regression detected")
             for warning in report.warnings:
                 console.print(f"- {warning}")
+        if report.notes:
+            console.print()
+            console.print("Notes:")
+            for note in report.notes:
+                console.print(f"- {note}")
         return out.getvalue()
 
     def format_real_benchmark(self, report: AttributionReport) -> str:
@@ -172,7 +191,11 @@ class ReportFormatter:
         console.print(f"Exact cache hits:          {exact_cache_hits}")
         console.print(f"Semantic cache hits:       {report.optimized.semantic_cache_hits}")
         console.print(f"Semantic tokens avoided:   {report.semantic_tokens_avoided}")
+        console.print(f"Semantic accepted:         {report.optimized.semantic_reuse_accepted}")
+        console.print(f"Semantic rejected:         {report.optimized.semantic_reuse_rejected}")
         console.print(f"Avg similarity score:      {report.optimized.avg_similarity_score:.3f}")
+        console.print(f"Embedding calls:           {report.optimized.embedding_calls}")
+        console.print(f"Embedding latency:         {report.optimized.embedding_latency_ms:.0f}ms")
         console.print(f"Graph reuse:               {report.optimized.steps_graph_reused}")
         console.print(f"Steps eliminated:          {report.steps_eliminated}")
         console.print(f"Partial recomputation:     {report.partial_recomputation_steps} reused steps")
@@ -186,6 +209,15 @@ class ReportFormatter:
             else 0.0
         )
         console.print(f"Repair success rate:       {success_rate:.1f}%")
+        if report.optimized.max_concurrency > 1:
+            console.print()
+            console.print("Parallel execution:")
+            console.print(f"Sequential estimate:       {report.optimized.sequential_estimated_latency_ms:.0f}ms")
+            console.print(f"Parallel latency:          {report.optimized.actual_parallel_latency_ms:.0f}ms")
+            console.print(f"Critical path:             {report.optimized.critical_path_latency_ms:.0f}ms")
+            console.print(f"Speedup:                   {report.optimized.parallel_speedup_factor:.2f}x")
+            console.print(f"Max concurrency:           {report.optimized.max_concurrency}")
+            console.print(f"Parallel steps executed:   {report.optimized.parallel_steps_executed}")
         console.print()
         table = Table(title="Per-step optimized metrics", box=None)
         table.add_column("step_id")
@@ -232,6 +264,11 @@ class ReportFormatter:
                 console.print(f"- {warning}")
         else:
             console.print("- none")
+        if report.notes:
+            console.print()
+            console.print("Notes:")
+            for note in report.notes:
+                console.print(f"- {note}")
         return out.getvalue()
 
     def format_run_result(self, result: RunResult) -> str:

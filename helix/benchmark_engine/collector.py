@@ -29,6 +29,7 @@ class BenchmarkCollector:
         mode: str,
         optimization_plan: Optional[OptimizationPlan],
         cost_table: dict[str, float],
+        run=None,
     ) -> BenchmarkResult:
         """Compute aggregate benchmark metrics."""
         input_tokens = sum(step.input_tokens for step in self.steps)
@@ -47,7 +48,7 @@ class BenchmarkCollector:
             run_id=run_id,
             workflow_id=workflow_id,
             mode=mode,
-            total_latency_ms=sum(step.latency_ms for step in self.steps),
+            total_latency_ms=getattr(run, "total_latency_ms", sum(step.latency_ms for step in self.steps)),
             total_input_tokens=input_tokens,
             total_output_tokens=output_tokens,
             total_tokens=total_tokens,
@@ -78,13 +79,23 @@ class BenchmarkCollector:
             tokens_saved_by_minimization=sum(step.tokens_saved_by_minimization for step in self.steps),
             net_token_change=sum(step.net_token_change for step in self.steps),
             semantic_cache_hits=sum(1 for step in self.steps if step.semantic_cache_hit),
+            semantic_reuse_accepted=sum(1 for step in self.steps if step.semantic_reuse_accepted),
+            semantic_reuse_rejected=sum(1 for step in self.steps if step.semantic_reuse_rejected),
             avg_similarity_score=(
                 sum(step.similarity_score for step in self.steps if step.semantic_reuse_applied)
                 / max(1, sum(1 for step in self.steps if step.semantic_reuse_applied))
             ),
+            embedding_latency_ms=sum(step.embedding_latency_ms for step in self.steps),
+            embedding_calls=sum(step.embedding_calls for step in self.steps),
             repair_attempts=sum(1 for step in self.steps if step.repair_attempted),
             repair_successes=sum(1 for step in self.steps if step.repair_successful),
             schema_validation_failures=sum(1 for step in self.steps if step.schema_validation_failed),
             per_step=list(self.steps),
             timestamp=dt.datetime.now(dt.UTC),
+            sequential_estimated_latency_ms=getattr(run, "sequential_estimated_latency_ms", 0.0),
+            actual_parallel_latency_ms=getattr(run, "actual_parallel_latency_ms", 0.0),
+            critical_path_latency_ms=getattr(run, "critical_path_latency_ms", 0.0),
+            parallel_speedup_factor=getattr(run, "parallel_speedup_factor", 1.0),
+            max_concurrency=getattr(run, "max_concurrency", 1),
+            parallel_steps_executed=getattr(run, "parallel_steps_executed", 0),
         )

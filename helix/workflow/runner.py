@@ -6,6 +6,7 @@ import json
 import re
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Optional
@@ -242,6 +243,15 @@ class WorkflowRunner:
         after = self._estimate_tokens(trimmed)
         return trimmed, max(0, before - after), applied
 
+    def _minimization_active(self, step) -> bool:
+        return bool(
+            step.input_projection
+            or step.max_input_tokens is not None
+            or step.max_dependency_tokens is not None
+            or step.compact
+            or step.output_schema
+        )
+
     def _messages_fingerprint(self, messages: list[dict]) -> str:
         return json.dumps(messages, sort_keys=True)
 
@@ -360,13 +370,17 @@ class WorkflowRunner:
         projection_messages: list[dict] | None = None,
         tokens_trimmed_by_budget: int = 0,
         budget_applied: bool = False,
-        projection_declared: bool = False,
+        minimization_active: bool = False,
         repair_attempted: bool = False,
         repair_successful: bool = False,
         structured_output_failed: bool = False,
         semantic_cache_hit: bool = False,
         semantic_reuse_applied: bool = False,
         similarity_score: float = 0.0,
+        semantic_reuse_accepted: bool = False,
+        semantic_reuse_rejected: bool = False,
+        embedding_latency_ms: float = 0.0,
+        embedding_calls: int = 0,
     ) -> StepResult:
         model = str(response.get("model", current.model))
         raw_input_tokens = self._estimate_tokens(raw_messages)
@@ -376,12 +390,13 @@ class WorkflowRunner:
         tokens_removed_by_projection = max(0, raw_input_tokens - projected_tokens)
         net_tokens_saved = raw_input_tokens - minimized_input_tokens
         warnings = []
-        if projection_declared and minimized_input_tokens > raw_input_tokens:
-            warnings.append("Context minimization regression: optimized prompt larger than raw prompt")
-        if projection_declared and projected_tokens >= raw_input_tokens:
-            warnings.append("Projection ineffective: no reduction in context")
-        if projection_declared and optimization_overhead_tokens > tokens_removed_by_projection:
-            warnings.append("Optimization overhead exceeded projection savings")
+        if minimization_active and decision_type == ExecutionDecisionType.EXECUTE:
+            if minimized_input_tokens > raw_input_tokens:
+                warnings.append("Context minimization regression: optimized prompt larger than raw prompt")
+            if current.input_projection and projected_tokens >= raw_input_tokens:
+                warnings.append("Projection ineffective: no reduction in context")
+            if optimization_overhead_tokens > tokens_removed_by_projection:
+                warnings.append("Optimization overhead exceeded projection savings")
         return StepResult(
             step_id=current.step_id,
             decision=decision_type,
@@ -421,6 +436,10 @@ class WorkflowRunner:
             semantic_cache_hit=semantic_cache_hit,
             semantic_reuse_applied=semantic_reuse_applied,
             similarity_score=similarity_score,
+            semantic_reuse_accepted=semantic_reuse_accepted,
+            semantic_reuse_rejected=semantic_reuse_rejected,
+            embedding_latency_ms=embedding_latency_ms,
+            embedding_calls=embedding_calls,
         )
 
     def _log_run(self, result: RunResult) -> None:
@@ -452,6 +471,10 @@ class WorkflowRunner:
                     "schema_validation_failed": step.schema_validation_failed,
                     "semantic_cache_hit": step.semantic_cache_hit,
                     "similarity_score": step.similarity_score,
+                    "semantic_reuse_accepted": step.semantic_reuse_accepted,
+                    "semantic_reuse_rejected": step.semantic_reuse_rejected,
+                    "embedding_latency_ms": step.embedding_latency_ms,
+                    "embedding_calls": step.embedding_calls,
                     "kv_prefix_overlap_tokens": step.kv_estimate.prefix_overlap_tokens
                     if step.kv_estimate
                     else 0,
@@ -463,6 +486,229 @@ class WorkflowRunner:
             ],
         }
         (runs_dir / f"{result.run_id}.json").write_text(json.dumps(payload, indent=2))
+
+    def _topological_levels(self, workflow: Workflow) -> list[list[int]]:
+        remaining = {step.step_id for step in workflow.steps}
+        completed: set[str] = set()
+        id_to_index = {step.step_id: index for index, step in enumerate(workflow.steps)}
+        levels: list[list[int]] = []
+        while remaining:
+            ready = [
+                step_id
+                for step_id in remaining
+                if all(dep in completed for dep in workflow.steps[id_to_index[step_id]].depends_on)
+            ]
+            if not ready:
+                raise ValueError("workflow dependencies contain a cycle")
+            ready.sort(key=lambda step_id: id_to_index[step_id])
+            levels.append([id_to_index[step_id] for step_id in ready])
+            completed.update(ready)
+            remaining.difference_update(ready)
+        return levels
+
+    def _execute_current(self, current) -> tuple[dict, bool, bool, bool, float]:
+        started = time.perf_counter()
+        response = self._call_step(current)
+        response, repair_attempted, repair_successful, structured_failed = (
+            self._repair_structured_response(current, response)
+        )
+        latency = float(response.get("latency_ms", (time.perf_counter() - started) * 1000))
+        return response, repair_attempted, repair_successful, structured_failed, latency
+
+    def _prepare_parallel_step(
+        self,
+        workflow: Workflow,
+        inputs: dict[str, str],
+        outputs: dict[str, dict],
+        index: int,
+        run_id: str,
+    ) -> dict[str, Any]:
+        raw_resolved = self._resolve_workflow(
+            workflow,
+            inputs,
+            outputs,
+            apply_field_slicing=False,
+        )
+        raw_current = raw_resolved.steps[index]
+        projected_resolved = self._resolve_workflow(
+            workflow,
+            inputs,
+            outputs,
+            use_projection=True,
+            apply_compact=False,
+        )
+        resolved = self._resolve_workflow(
+            workflow,
+            inputs,
+            outputs,
+            use_projection=True,
+            apply_compact=True,
+        )
+        partial = deepcopy(resolved)
+        partial.steps = [resolved.steps[index]]
+        current = partial.steps[0]
+        self._minimize_step_context(current)
+        budget_messages, tokens_trimmed_by_budget, budget_applied = self._apply_prompt_budget(
+            current,
+            current.messages,
+        )
+        current.messages = budget_messages
+        step_plan = self.optimizer.plan(partial, run_id)
+        return {
+            "index": index,
+            "current": current,
+            "decision": step_plan.decisions[0],
+            "estimated_time_saved_ms": step_plan.estimated_total_time_saved_ms,
+            "estimated_cost_saved_usd": step_plan.estimated_total_cost_saved_usd,
+            "raw_messages": deepcopy(raw_current.messages),
+            "projection_messages": deepcopy(projected_resolved.steps[index].messages),
+            "minimized_messages": deepcopy(current.messages),
+            "tokens_trimmed_by_budget": tokens_trimmed_by_budget,
+            "budget_applied": budget_applied,
+        }
+
+    def run_parallel(
+        self,
+        workflow: Workflow,
+        inputs: dict[str, str],
+        run_id: Optional[str] = None,
+    ) -> RunResult:
+        """Run an optimized workflow with ready DAG levels executed concurrently."""
+        if self.baseline_mode:
+            return self.run(workflow, inputs, run_id)
+        run_id = run_id or str(uuid.uuid4())
+        outputs: dict[str, dict] = {}
+        step_results_by_index: dict[int, StepResult] = {}
+        decisions: list[ExecutionDecision] = []
+        estimated_time_saved_ms = 0.0
+        estimated_cost_saved_usd = 0.0
+        levels = self._topological_levels(workflow)
+        max_concurrency = max((len(level) for level in levels), default=1)
+        critical_path_latency_ms = 0.0
+        started_run = time.perf_counter()
+        for level in levels:
+            prepared = [
+                self._prepare_parallel_step(workflow, inputs, outputs, index, run_id)
+                for index in level
+            ]
+            decisions.extend(item["decision"] for item in prepared)
+            estimated_time_saved_ms += sum(item["estimated_time_saved_ms"] for item in prepared)
+            estimated_cost_saved_usd += sum(item["estimated_cost_saved_usd"] for item in prepared)
+            futures = {}
+            for item in prepared:
+                decision = item["decision"]
+                if decision.decision == ExecutionDecisionType.CACHE_HIT and decision.cache_entry:
+                    item["response"] = decision.cache_entry.response
+                    item["latency"] = 0.0
+                    item["repair_attempted"] = False
+                    item["repair_successful"] = False
+                    item["structured_failed"] = False
+                elif decision.decision == ExecutionDecisionType.GRAPH_REUSE and decision.graph_node:
+                    item["response"] = decision.graph_node.response
+                    item["latency"] = 0.0
+                    item["repair_attempted"] = False
+                    item["repair_successful"] = False
+                    item["structured_failed"] = False
+                else:
+                    futures[item["index"]] = item
+            if futures:
+                with ThreadPoolExecutor(max_workers=len(futures)) as executor:
+                    future_map = {
+                        executor.submit(self._execute_current, item["current"]): item
+                        for item in futures.values()
+                    }
+                    for future in as_completed(future_map):
+                        item = future_map[future]
+                        (
+                            item["response"],
+                            item["repair_attempted"],
+                            item["repair_successful"],
+                            item["structured_failed"],
+                            item["latency"],
+                        ) = future.result()
+            critical_path_latency_ms += max(float(item["latency"]) for item in prepared)
+            for item in sorted(prepared, key=lambda value: value["index"]):
+                decision = item["decision"]
+                response = item["response"]
+                latency = float(item["latency"])
+                if decision.decision == ExecutionDecisionType.EXECUTE:
+                    self.optimizer.record_execution(decision, response, latency)
+                input_tokens = (
+                    0
+                    if decision.decision != ExecutionDecisionType.EXECUTE
+                    else int(response.get("input_tokens", 0))
+                )
+                output_tokens = (
+                    0
+                    if decision.decision != ExecutionDecisionType.EXECUTE
+                    else int(response.get("output_tokens", 0))
+                )
+                result = self._step_result(
+                    item["current"],
+                    decision.decision,
+                    response,
+                    input_tokens,
+                    output_tokens,
+                    latency,
+                    decision.kv_estimate,
+                    decision.decision == ExecutionDecisionType.CACHE_HIT,
+                    decision.decision == ExecutionDecisionType.GRAPH_REUSE,
+                    item["raw_messages"],
+                    item["minimized_messages"],
+                    item["projection_messages"],
+                    item["tokens_trimmed_by_budget"],
+                    item["budget_applied"],
+                    self._minimization_active(item["current"]),
+                    bool(item.get("repair_attempted", False)),
+                    bool(item.get("repair_successful", False)),
+                    bool(item.get("structured_failed", False)),
+                    decision.semantic_cache_hit,
+                    decision.semantic_reuse_applied,
+                    decision.similarity_score,
+                    decision.semantic_reuse_accepted,
+                    decision.semantic_reuse_rejected,
+                    decision.embedding_latency_ms,
+                    decision.embedding_calls,
+                )
+                outputs[item["current"].step_id] = response
+                step_results_by_index[item["index"]] = result
+        actual_parallel_latency_ms = (time.perf_counter() - started_run) * 1000
+        step_results = [
+            step_results_by_index[index]
+            for index in sorted(step_results_by_index)
+        ]
+        for result in step_results:
+            self.benchmark_collector.record_step(result)
+        sequential_estimated_latency_ms = sum(step.latency_ms for step in step_results)
+        plan = OptimizationPlan(
+            run_id,
+            workflow.workflow_id,
+            decisions,
+            estimated_time_saved_ms,
+            estimated_cost_saved_usd,
+        )
+        run_result = RunResult(
+            run_id=run_id,
+            workflow_id=workflow.workflow_id,
+            step_results=step_results,
+            total_latency_ms=actual_parallel_latency_ms,
+            total_input_tokens=sum(step.input_tokens for step in step_results),
+            total_output_tokens=sum(step.output_tokens for step in step_results),
+            optimization_plan=plan,
+            baseline_mode=False,
+            sequential_estimated_latency_ms=sequential_estimated_latency_ms,
+            actual_parallel_latency_ms=actual_parallel_latency_ms,
+            critical_path_latency_ms=critical_path_latency_ms,
+            parallel_speedup_factor=sequential_estimated_latency_ms / actual_parallel_latency_ms
+            if actual_parallel_latency_ms
+            else 1.0,
+            max_concurrency=max_concurrency,
+            parallel_steps_executed=sum(
+                1 for step in step_results if step.decision == ExecutionDecisionType.EXECUTE
+            ),
+        )
+        self._log_run(run_result)
+        return run_result
 
     def run(
         self,
@@ -518,7 +764,9 @@ class WorkflowRunner:
                     raw_messages,
                     raw_messages,
                     raw_messages,
+                    0,
                     False,
+                    self._minimization_active(current),
                     repair_attempted,
                     repair_successful,
                     structured_failed,
@@ -586,7 +834,7 @@ class WorkflowRunner:
                         projection_messages,
                         tokens_trimmed_by_budget,
                         budget_applied,
-                        bool(current.input_projection),
+                        self._minimization_active(current),
                     )
                     outputs[current.step_id] = response
                     step_results.append(result)
@@ -640,13 +888,17 @@ class WorkflowRunner:
                     projection_messages,
                     tokens_trimmed_by_budget,
                     budget_applied,
-                    bool(current.input_projection),
+                    self._minimization_active(current),
                     repair_attempted,
                     repair_successful,
                     structured_failed,
                     decision.semantic_cache_hit,
                     decision.semantic_reuse_applied,
                     decision.similarity_score,
+                    decision.semantic_reuse_accepted,
+                    decision.semantic_reuse_rejected,
+                    decision.embedding_latency_ms,
+                    decision.embedding_calls,
                 )
                 outputs[current.step_id] = response
                 reusable_responses[fingerprint] = response

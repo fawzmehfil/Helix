@@ -92,6 +92,10 @@ class StepResult:
     semantic_cache_hit: bool = False
     semantic_reuse_applied: bool = False
     similarity_score: float = 0.0
+    semantic_reuse_accepted: bool = False
+    semantic_reuse_rejected: bool = False
+    embedding_latency_ms: float = 0.0
+    embedding_calls: int = 0
 
 
 @dataclass
@@ -106,3 +110,9 @@ class RunResult:
     total_output_tokens: int
     optimization_plan: Optional[OptimizationPlan]
     baseline_mode: bool
+    sequential_estimated_latency_ms: float = 0.0
+    actual_parallel_latency_ms: float = 0.0
+    critical_path_latency_ms: float = 0.0
+    parallel_speedup_factor: float = 1.0
+    max_concurrency: int = 1
+    parallel_steps_executed: int = 0

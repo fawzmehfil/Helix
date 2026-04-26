@@ -26,6 +26,17 @@ class CacheEntry:
     hit_count: int = 0
 
 
+@dataclass
+class SemanticCacheMatch:
+    """Nearest semantic cache candidate."""
+
+    entry: CacheEntry
+    similarity: float
+    previous_input: str
+    embedding_latency_ms: float
+    embedding_calls: int
+
+
 class CacheKey:
     """Deterministic composition of input block hashes."""
 
@@ -63,4 +74,3 @@ class CachePolicy:
     max_entries: int = 10_000
     eviction: str = "lru"
     invalidate_on_model_change: bool = True
-

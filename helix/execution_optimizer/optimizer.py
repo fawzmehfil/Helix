@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
+import sys
 import uuid
 from typing import TYPE_CHECKING, cast
 
@@ -34,6 +35,7 @@ class ExecutionOptimizer:
         kv_simulator: KVSimulator,
         model_id: str,
         optimizations_enabled: bool = True,
+        semantic_review_mode: str = "auto_accept",
     ) -> None:
         """Create an optimizer."""
         self.decomposer = decomposer
@@ -43,8 +45,30 @@ class ExecutionOptimizer:
         self.kv_simulator = kv_simulator
         self.model_id = model_id
         self.optimizations_enabled = optimizations_enabled
+        self.semantic_review_mode = semantic_review_mode
         self._snapshots: dict[str, tuple["ContextSnapshot", CacheKey, str]] = {}
         self._previous_snapshot_by_run: dict[str, "ContextSnapshot"] = {}
+
+    def _semantic_candidate_accepted(
+        self,
+        similarity: float,
+        current_input: str,
+        previous_input: str,
+        previous_output: dict,
+    ) -> bool:
+        if self.semantic_review_mode == "auto_reject":
+            return False
+        if self.semantic_review_mode == "auto_accept":
+            return True
+        if not sys.stdin.isatty():
+            return False
+        print("--- SEMANTIC REUSE CANDIDATE ---")
+        print(f"Similarity: {similarity:.3f}")
+        print(f'Previous input: "{previous_input[:500]}"')
+        print(f'Current input: "{current_input[:500]}"')
+        print(f'Previous output: "{str(previous_output.get("content", previous_output))[:500]}"')
+        answer = input("Decision [accept/reject]: ").strip().lower()
+        return answer in {"a", "accept", "y", "yes"}
 
     def plan(self, workflow: "Workflow", run_id: str) -> OptimizationPlan:
         """For each step in workflow, produce an ExecutionDecision."""
@@ -83,27 +107,37 @@ class ExecutionOptimizer:
                         reason="resolved context and model matched cache key",
                     )
                 else:
-                    semantic_entry = None
+                    semantic_match = None
                     similarity = 0.0
                     if step.semantic_reuse:
-                        semantic_entry, similarity = self.cache_store.find_semantic(
+                        semantic_match = self.cache_store.find_semantic(
                             step.step_id,
                             model,
                             semantic_input,
                             step.semantic_threshold,
                         )
-                    if semantic_entry is not None:
+                        similarity = semantic_match.similarity if semantic_match else 0.0
+                    if semantic_match is not None and self._semantic_candidate_accepted(
+                        semantic_match.similarity,
+                        semantic_input,
+                        semantic_match.previous_input,
+                        semantic_match.entry.response,
+                    ):
                         decision = ExecutionDecision(
                             step.step_id,
                             ExecutionDecisionType.CACHE_HIT,
-                            cache_entry=semantic_entry,
+                            cache_entry=semantic_match.entry,
                             cache_key=key.key,
                             semantic_cache_hit=True,
                             semantic_reuse_applied=True,
-                            similarity_score=similarity,
+                            similarity_score=semantic_match.similarity,
                             semantic_reuse_enabled=True,
                             semantic_input=semantic_input,
-                            reason=f"semantic cache matched at {similarity:.3f}",
+                            semantic_previous_input=semantic_match.previous_input,
+                            semantic_reuse_accepted=True,
+                            embedding_latency_ms=semantic_match.embedding_latency_ms,
+                            embedding_calls=semantic_match.embedding_calls,
+                            reason=f"semantic cache accepted at {semantic_match.similarity:.3f}",
                         )
                     else:
                         node = self.graph_reuser.find_reusable_node(snapshot, model)
@@ -129,7 +163,21 @@ class ExecutionOptimizer:
                                 semantic_reuse_enabled=step.semantic_reuse,
                                 semantic_input=semantic_input,
                                 similarity_score=similarity,
-                                reason="no cache or graph match for resolved context",
+                                semantic_previous_input=semantic_match.previous_input
+                                if semantic_match
+                                else "",
+                                semantic_reuse_rejected=semantic_match is not None,
+                                embedding_latency_ms=semantic_match.embedding_latency_ms
+                                if semantic_match
+                                else 0.0,
+                                embedding_calls=semantic_match.embedding_calls
+                                if semantic_match
+                                else 0,
+                                reason=(
+                                    f"semantic cache rejected at {similarity:.3f}"
+                                    if semantic_match
+                                    else "no cache or graph match for resolved context"
+                                ),
                             )
             decisions.append(decision)
             prev_snapshot = snapshot

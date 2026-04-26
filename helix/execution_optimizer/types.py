@@ -35,6 +35,11 @@ class ExecutionDecision:
     similarity_score: float = 0.0
     semantic_reuse_enabled: bool = False
     semantic_input: str = ""
+    semantic_previous_input: str = ""
+    semantic_reuse_accepted: bool = False
+    semantic_reuse_rejected: bool = False
+    embedding_latency_ms: float = 0.0
+    embedding_calls: int = 0
     reason: str = ""
 
 

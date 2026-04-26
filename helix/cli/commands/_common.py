@@ -9,6 +9,7 @@ from helix.benchmark_engine import BenchmarkCollector
 from helix.cache_engine import CacheStore
 from helix.config import HelixConfig
 from helix.context_engine import ContextDecomposer, SemanticHasher
+from helix.embeddings import build_embedding_provider
 from helix.execution_optimizer import ExecutionOptimizer
 from helix.graph_engine import ComputationGraph, GraphReuser
 from helix.kv_simulator import KVSimulator
@@ -42,7 +43,11 @@ def build_runner(
         model or cfg.model,
         require_available=require_available,
     )
-    cache = CacheStore(cache_path or cfg.cache_db_path, cfg.cache)
+    embedding_provider = build_embedding_provider(
+        cfg.embedding_backend.type,
+        cfg.embedding_backend.model,
+    )
+    cache = CacheStore(cache_path or cfg.cache_db_path, cfg.cache, embedding_provider)
     graph = ComputationGraph(graph_path or cfg.graph_db_path)
     hasher = SemanticHasher()
     decomposer = ContextDecomposer(hasher)
@@ -55,5 +60,6 @@ def build_runner(
         kv,
         client.model_id,
         optimizations_enabled=not baseline,
+        semantic_review_mode=cfg.semantic_review.mode,
     )
     return WorkflowRunner(optimizer, client, EchoToolClient(), BenchmarkCollector(), baseline)

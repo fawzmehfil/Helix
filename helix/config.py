@@ -14,6 +14,21 @@ from helix.kv_simulator.types import ModelSpec
 
 
 @dataclass
+class EmbeddingConfig:
+    """Embedding provider configuration."""
+
+    type: str = "local"
+    model: str = "local-hash-embedding"
+
+
+@dataclass
+class SemanticReviewConfig:
+    """Semantic reuse review configuration."""
+
+    mode: str = "interactive"
+
+
+@dataclass
 class HelixConfig:
     """Runtime configuration for Helix."""
 
@@ -27,6 +42,8 @@ class HelixConfig:
     runs_dir: str = "~/.helix/runs/"
     model_specs: dict[str, ModelSpec] = field(default_factory=dict)
     cost_table: dict[str, float] = field(default_factory=dict)
+    embedding_backend: EmbeddingConfig = field(default_factory=EmbeddingConfig)
+    semantic_review: SemanticReviewConfig = field(default_factory=SemanticReviewConfig)
 
     @classmethod
     def from_yaml(cls, path: str) -> "HelixConfig":
@@ -54,6 +71,15 @@ class HelixConfig:
                 cost_per_1k_output_tokens=float(item.get("cost_per_1k_output_tokens", 0.0)),
             )
         cfg.cost_table.update(data.get("benchmark", {}).get("cost_per_1k_tokens", {}))
+        embedding_data = data.get("embedding_backend", {})
+        cfg.embedding_backend = EmbeddingConfig(
+            type=embedding_data.get("type", cfg.embedding_backend.type),
+            model=embedding_data.get("model", cfg.embedding_backend.model),
+        )
+        review_data = data.get("semantic_review", {})
+        cfg.semantic_review = SemanticReviewConfig(
+            mode=review_data.get("mode", cfg.semantic_review.mode),
+        )
         return cfg
 
     @classmethod
@@ -64,6 +90,13 @@ class HelixConfig:
         cfg.cache_db_path = os.environ.get("HELIX_CACHE_PATH", cfg.cache_db_path)
         cfg.graph_db_path = os.environ.get("HELIX_GRAPH_PATH", cfg.graph_db_path)
         cfg.runs_dir = os.environ.get("HELIX_RUNS_DIR", cfg.runs_dir)
+        cfg.embedding_backend = EmbeddingConfig(
+            type=os.environ.get("HELIX_EMBEDDING_BACKEND", cfg.embedding_backend.type),
+            model=os.environ.get("HELIX_EMBEDDING_MODEL", cfg.embedding_backend.model),
+        )
+        cfg.semantic_review = SemanticReviewConfig(
+            mode=os.environ.get("HELIX_SEMANTIC_REVIEW_MODE", cfg.semantic_review.mode),
+        )
         cfg.model_specs = {
             "fake": ModelSpec("fake", 60.0, 0.1, 0.0, 0.0),
             "gpt-4o-mini": ModelSpec("gpt-4o-mini", 80.0, 0.1, 0.00015, 0.00060),

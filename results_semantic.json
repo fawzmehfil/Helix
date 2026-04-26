@@ -2,12 +2,12 @@
   "workflow_id": "demo_semantic_reuse_v1",
   "backend": "openai",
   "model": "gpt-4o-mini",
-  "timestamp": "2026-04-25T18:27:53.875817+00:00",
+  "timestamp": "2026-04-26T02:04:58.985081+00:00",
   "baseline": {
-    "run_id": "791903a1-fdbe-4cb0-b222-26a72e77eab0",
+    "run_id": "d935282c-206a-40a4-a8c5-c63925bccd09",
     "workflow_id": "demo_semantic_reuse_v1",
     "mode": "baseline",
-    "total_latency_ms": 1056.9146249999903,
+    "total_latency_ms": 1156.2285420004628,
     "total_input_tokens": 29,
     "total_output_tokens": 29,
     "total_tokens": 58,
@@ -30,13 +30,25 @@
       "warnings": []
     },
     "semantic_reuse": {
-      "semantic_cache_hits": 0,
-      "avg_similarity_score": 0.0
+      "hits": 0,
+      "accepted": 0,
+      "rejected": 0,
+      "avg_similarity": 0.0,
+      "embedding_latency_ms": 0.0,
+      "embedding_calls": 0
     },
     "structured_output": {
       "repair_attempts": 0,
       "repair_successes": 0,
       "schema_validation_failures": 0
+    },
+    "parallel": {
+      "sequential_estimated_latency_ms": 0.0,
+      "actual_parallel_latency_ms": 0.0,
+      "critical_path_latency_ms": 0.0,
+      "parallel_speedup_factor": 1.0,
+      "max_concurrency": 1,
+      "parallel_steps_executed": 0
     },
     "per_step": [
       {
@@ -52,15 +64,19 @@
         "optimization_overhead_tokens": 0,
         "net_tokens_saved_by_minimization": 0,
         "minimization_effective": false,
-        "tokens_trimmed_by_budget": false,
+        "tokens_trimmed_by_budget": 0,
         "budget_applied": false,
         "minimization_warnings": [],
         "cache_hit": false,
         "semantic_cache_hit": false,
         "semantic_reuse_applied": false,
+        "semantic_reuse_accepted": false,
+        "semantic_reuse_rejected": false,
         "similarity_score": 0.0,
+        "embedding_latency_ms": 0.0,
+        "embedding_calls": 0,
         "graph_reuse": false,
-        "latency_ms": 1056.9146249999903,
+        "latency_ms": 1156.2285420004628,
         "cost_usd": 2.175e-05,
         "model": "gpt-4o-mini",
         "call_count": 1,
@@ -72,7 +88,7 @@
     ]
   },
   "optimized": {
-    "run_id": "5d899cf1-eb5e-439d-9d8c-0e4609745ddc",
+    "run_id": "8a10b37c-edf3-4d03-900b-d44861cc5442",
     "workflow_id": "demo_semantic_reuse_v1",
     "mode": "optimized",
     "total_latency_ms": 0.0,
@@ -88,23 +104,35 @@
     "context_minimization": {
       "raw_input_tokens": 29,
       "projected_input_tokens": 29,
-      "minimized_input_tokens": 32,
+      "minimized_input_tokens": 29,
       "tokens_removed_by_projection": 0,
-      "optimization_overhead_tokens": 3,
-      "net_tokens_saved_by_minimization": -3,
+      "optimization_overhead_tokens": 0,
+      "net_tokens_saved_by_minimization": 0,
       "minimization_effective": false,
       "tokens_trimmed_by_budget": 0,
       "budget_applied_steps": 0,
       "warnings": []
     },
     "semantic_reuse": {
-      "semantic_cache_hits": 1,
-      "avg_similarity_score": 0.9999999999999999
+      "hits": 1,
+      "accepted": 1,
+      "rejected": 0,
+      "avg_similarity": 1.0,
+      "embedding_latency_ms": 0.2001249995373655,
+      "embedding_calls": 1
     },
     "structured_output": {
       "repair_attempts": 0,
       "repair_successes": 0,
       "schema_validation_failures": 0
+    },
+    "parallel": {
+      "sequential_estimated_latency_ms": 0.0,
+      "actual_parallel_latency_ms": 0.0,
+      "critical_path_latency_ms": 0.0,
+      "parallel_speedup_factor": 1.0,
+      "max_concurrency": 1,
+      "parallel_steps_executed": 0
     },
     "per_step": [
       {
@@ -115,10 +143,10 @@
         "total_tokens": 0,
         "raw_input_tokens": 29,
         "projected_input_tokens": 29,
-        "minimized_input_tokens": 32,
+        "minimized_input_tokens": 29,
         "tokens_removed_by_projection": 0,
-        "optimization_overhead_tokens": 3,
-        "net_tokens_saved_by_minimization": -3,
+        "optimization_overhead_tokens": 0,
+        "net_tokens_saved_by_minimization": 0,
         "minimization_effective": false,
         "tokens_trimmed_by_budget": 0,
         "budget_applied": false,
@@ -126,7 +154,11 @@
         "cache_hit": true,
         "semantic_cache_hit": true,
         "semantic_reuse_applied": true,
-        "similarity_score": 0.9999999999999999,
+        "semantic_reuse_accepted": true,
+        "semantic_reuse_rejected": false,
+        "similarity_score": 1.0,
+        "embedding_latency_ms": 0.2001249995373655,
+        "embedding_calls": 1,
         "graph_reuse": false,
         "latency_ms": 0.0,
         "cost_usd": 0.0,
@@ -142,26 +174,41 @@
   "context_minimization": {
     "raw_input_tokens": 29,
     "projected_input_tokens": 29,
-    "minimized_input_tokens": 32,
+    "minimized_input_tokens": 29,
     "tokens_removed_by_projection": 0,
-    "optimization_overhead_tokens": 3,
-    "net_tokens_saved_by_minimization": -3,
+    "optimization_overhead_tokens": 0,
+    "net_tokens_saved_by_minimization": 0,
     "minimization_effective": false,
     "tokens_trimmed_by_budget": 0,
     "warnings": []
   },
   "semantic_reuse": {
-    "semantic_cache_hits": 1,
-    "avg_similarity_score": 0.9999999999999999,
+    "hits": 1,
+    "accepted": 1,
+    "rejected": 0,
+    "avg_similarity": 1.0,
+    "embedding_latency_ms": 0.2001249995373655,
+    "embedding_calls": 1,
     "semantic_calls_avoided": 1,
     "semantic_tokens_avoided": 58
+  },
+  "call_savings": {
+    "calls_avoided": 1,
+    "tokens_avoided_via_skips": 58
   },
   "structured_output": {
     "repair_attempts": 0,
     "repair_successes": 0,
     "schema_validation_failures": 0
   },
-  "warnings": [
-    "minimization overhead exceeded savings (3 overhead vs 0 removed)"
-  ]
+  "parallel": {
+    "sequential_estimated_latency_ms": 0.0,
+    "actual_parallel_latency_ms": 0.0,
+    "critical_path_latency_ms": 0.0,
+    "parallel_speedup_factor": 1.0,
+    "max_concurrency": 1,
+    "parallel_steps_executed": 0
+  },
+  "warnings": [],
+  "notes": []
 }

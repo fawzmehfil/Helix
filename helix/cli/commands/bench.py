@@ -56,7 +56,11 @@ def _step_json(step) -> dict:
         "cache_hit": step.cache_hit,
         "semantic_cache_hit": step.semantic_cache_hit,
         "semantic_reuse_applied": step.semantic_reuse_applied,
+        "semantic_reuse_accepted": step.semantic_reuse_accepted,
+        "semantic_reuse_rejected": step.semantic_reuse_rejected,
         "similarity_score": step.similarity_score,
+        "embedding_latency_ms": step.embedding_latency_ms,
+        "embedding_calls": step.embedding_calls,
         "graph_reuse": step.graph_reuse,
         "latency_ms": step.latency_ms,
         "cost_usd": step.estimated_cost_usd,
@@ -97,13 +101,25 @@ def _result_json(result) -> dict:
             "warnings": result.minimization_warnings,
         },
         "semantic_reuse": {
-            "semantic_cache_hits": result.semantic_cache_hits,
-            "avg_similarity_score": result.avg_similarity_score,
+            "hits": result.semantic_cache_hits,
+            "accepted": result.semantic_reuse_accepted,
+            "rejected": result.semantic_reuse_rejected,
+            "avg_similarity": result.avg_similarity_score,
+            "embedding_latency_ms": result.embedding_latency_ms,
+            "embedding_calls": result.embedding_calls,
         },
         "structured_output": {
             "repair_attempts": result.repair_attempts,
             "repair_successes": result.repair_successes,
             "schema_validation_failures": result.schema_validation_failures,
+        },
+        "parallel": {
+            "sequential_estimated_latency_ms": result.sequential_estimated_latency_ms,
+            "actual_parallel_latency_ms": result.actual_parallel_latency_ms,
+            "critical_path_latency_ms": result.critical_path_latency_ms,
+            "parallel_speedup_factor": result.parallel_speedup_factor,
+            "max_concurrency": result.max_concurrency,
+            "parallel_steps_executed": result.parallel_steps_executed,
         },
         "per_step": [_step_json(step) for step in result.per_step],
     }
@@ -129,17 +145,34 @@ def _write_json_report(path: str, report, backend: str, model: str) -> None:
             "warnings": report.optimized.minimization_warnings,
         },
         "semantic_reuse": {
-            "semantic_cache_hits": report.optimized.semantic_cache_hits,
-            "avg_similarity_score": report.optimized.avg_similarity_score,
+            "hits": report.optimized.semantic_cache_hits,
+            "accepted": report.optimized.semantic_reuse_accepted,
+            "rejected": report.optimized.semantic_reuse_rejected,
+            "avg_similarity": report.optimized.avg_similarity_score,
+            "embedding_latency_ms": report.optimized.embedding_latency_ms,
+            "embedding_calls": report.optimized.embedding_calls,
             "semantic_calls_avoided": report.semantic_calls_avoided,
             "semantic_tokens_avoided": report.semantic_tokens_avoided,
+        },
+        "call_savings": {
+            "calls_avoided": report.calls_avoided,
+            "tokens_avoided_via_skips": report.tokens_avoided,
         },
         "structured_output": {
             "repair_attempts": report.optimized.repair_attempts,
             "repair_successes": report.optimized.repair_successes,
             "schema_validation_failures": report.optimized.schema_validation_failures,
         },
+        "parallel": {
+            "sequential_estimated_latency_ms": report.optimized.sequential_estimated_latency_ms,
+            "actual_parallel_latency_ms": report.optimized.actual_parallel_latency_ms,
+            "critical_path_latency_ms": report.optimized.critical_path_latency_ms,
+            "parallel_speedup_factor": report.optimized.parallel_speedup_factor,
+            "max_concurrency": report.optimized.max_concurrency,
+            "parallel_steps_executed": report.optimized.parallel_steps_executed,
+        },
         "warnings": report.warnings,
+        "notes": report.notes,
     }
     with open(path, "w", encoding="utf-8") as handle:
         json.dump(payload, handle, indent=2)
@@ -155,6 +188,7 @@ def _write_json_report(path: str, report, backend: str, model: str) -> None:
 @click.option("--cache-path", default=None, help="Cache database path for this benchmark.")
 @click.option("--graph-path", default=None, help="Graph database path for this benchmark.")
 @click.option("--json-out", default=None, help="Write benchmark results to a JSON artifact.")
+@click.option("--parallel", is_flag=True, help="Run optimized workflow with DAG-level parallel execution.")
 def bench_cmd(
     workflow_path: str,
     inputs: tuple[str, ...],
@@ -165,6 +199,7 @@ def bench_cmd(
     cache_path: str | None,
     graph_path: str | None,
     json_out: str | None,
+    parallel: bool,
 ) -> None:
     """Run baseline vs optimized benchmark."""
     workflow = WorkflowParser().parse_file(workflow_path)
@@ -206,19 +241,26 @@ def bench_cmd(
             )
             measured_inputs = parsed_inputs or _metadata_inputs(workflow, "measured_inputs")
             warmup_inputs = _metadata_inputs(workflow, "warmup_inputs") or measured_inputs
-            report = BenchmarkRunner(
+            runner = BenchmarkRunner(
                 baseline,
                 optimized,
                 HelixConfig.default().cost_table,
-            ).run_real_comparison(workflow, measured_inputs, warmup_inputs)
+            )
+            if parallel:
+                report = runner.run_parallel_comparison(workflow, measured_inputs)
+            else:
+                report = runner.run_real_comparison(workflow, measured_inputs, warmup_inputs)
             console.print(ReportFormatter().format_real_benchmark(report))
             if json_out:
                 _write_json_report(json_out, report, selected_backend, model)
         else:
             baseline = build_runner(backend, baseline=True, cache_path=cache_path, graph_path=graph_path)
             optimized = build_runner(backend, baseline=False, cache_path=cache_path, graph_path=graph_path)
-            report = BenchmarkRunner(baseline, optimized, HelixConfig.default().cost_table).run_comparison(
-                workflow, parsed_inputs
+            runner = BenchmarkRunner(baseline, optimized, HelixConfig.default().cost_table)
+            report = (
+                runner.run_parallel_comparison(workflow, parsed_inputs)
+                if parallel
+                else runner.run_comparison(workflow, parsed_inputs)
             )
             console.print(ReportFormatter().format_attribution(report))
             if json_out:

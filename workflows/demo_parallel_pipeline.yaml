@@ -1,0 +1,58 @@
+workflow_id: demo_parallel_pipeline_v1
+name: "Parallel Document Pipeline"
+description: "Independent extraction branches followed by one aggregation step."
+default_model: gpt-4o-mini
+metadata:
+  measured_inputs:
+    document: "Acme Medical invoice 1007 lists imaging sensors, calibration service, a rush delivery flag, two named approvers, and a net-15 payment term."
+steps:
+  - step_id: extract_metadata
+    step_type: llm_call
+    cacheable: false
+    max_output_tokens: 50
+    messages:
+      - role: system
+        content: "Extract concise invoice metadata."
+      - role: user
+        content: "{document}"
+  - step_id: extract_risks
+    step_type: llm_call
+    cacheable: false
+    max_output_tokens: 50
+    messages:
+      - role: system
+        content: "Extract concise operational risks."
+      - role: user
+        content: "{document}"
+  - step_id: extract_action_items
+    step_type: llm_call
+    cacheable: false
+    max_output_tokens: 50
+    messages:
+      - role: system
+        content: "Extract concise action items."
+      - role: user
+        content: "{document}"
+  - step_id: extract_entities
+    step_type: llm_call
+    cacheable: false
+    max_output_tokens: 50
+    messages:
+      - role: system
+        content: "Extract concise named entities."
+      - role: user
+        content: "{document}"
+  - step_id: aggregate_report
+    step_type: llm_call
+    cacheable: false
+    depends_on:
+      - extract_metadata
+      - extract_risks
+      - extract_action_items
+      - extract_entities
+    max_output_tokens: 80
+    messages:
+      - role: system
+        content: "Combine branch outputs into one short processing report."
+      - role: user
+        content: "metadata={extract_metadata.output}; risks={extract_risks.output}; actions={extract_action_items.output}; entities={extract_entities.output}"

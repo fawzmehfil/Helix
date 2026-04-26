@@ -13,8 +13,9 @@ dependencies = ["click>=8.1", "pyyaml>=6.0", "rich>=13.0"]
 [project.optional-dependencies]
 openai = ["openai>=1.0", "tiktoken>=0.7"]
 anthropic = ["anthropic>=0.25"]
+embeddings = ["sentence-transformers>=2.7"]
 dev = ["pytest>=7.0", "pytest-cov", "mypy", "ruff"]
-all = ["helix[openai,anthropic,dev]"]
+all = ["helix[openai,anthropic,embeddings,dev]"]
 
 [project.scripts]
 helix = "helix.cli.main:cli"

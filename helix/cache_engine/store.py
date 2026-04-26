@@ -5,22 +5,27 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
-import math
-import re
 import sqlite3
 from pathlib import Path
 from typing import Optional
 
-from helix.cache_engine.types import CacheEntry, CacheKey, CachePolicy
+from helix.cache_engine.types import CacheEntry, CacheKey, CachePolicy, SemanticCacheMatch
+from helix.embeddings import CachedEmbeddingProvider, build_embedding_provider, cosine_similarity
 
 
 class CacheStore:
     """SQLite-backed cache storage."""
 
-    def __init__(self, db_path: str, policy: CachePolicy) -> None:
+    def __init__(
+        self,
+        db_path: str,
+        policy: CachePolicy,
+        embedding_provider: CachedEmbeddingProvider | None = None,
+    ) -> None:
         """Initialize a cache database."""
         self.db_path = str(Path(db_path).expanduser())
         self.policy = policy
+        self.embedding_provider = embedding_provider or build_embedding_provider("local")
         self._miss_count = 0
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as conn:
@@ -46,32 +51,6 @@ class CacheStore:
     def _parse_datetime(self, value: str) -> dt.datetime:
         parsed = dt.datetime.fromisoformat(value)
         return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=dt.UTC)
-
-    def embed_text(self, text: str) -> dict[str, float]:
-        """Create a deterministic lexical embedding for local semantic reuse."""
-        tokens = re.findall(r"[a-z0-9]+", text.lower())
-        aliases = {
-            "corporation": "corp",
-            "corp": "corp",
-            "company": "corp",
-            "inc": "corp",
-            "summarize": "summarize",
-            "summary": "summarize",
-            "invoice": "invoice",
-        }
-        counts: dict[str, float] = {}
-        for token in tokens:
-            normalized = aliases.get(token, token)
-            counts[normalized] = counts.get(normalized, 0.0) + 1.0
-        norm = math.sqrt(sum(value * value for value in counts.values()))
-        if norm == 0:
-            return {}
-        return {key: value / norm for key, value in counts.items()}
-
-    def _cosine(self, left: dict[str, float], right: dict[str, float]) -> float:
-        if not left or not right:
-            return 0.0
-        return sum(value * right.get(key, 0.0) for key, value in left.items())
 
     def get(self, key: CacheKey) -> Optional[CacheEntry]:
         """Return entry if present and not expired. Increment hit_count."""
@@ -137,7 +116,7 @@ class CacheStore:
         """Persist semantic-reuse metadata for an executed step."""
         if not self.policy.enabled:
             return
-        embedding = self.embed_text(minimized_input)
+        embedding = self.embedding_provider.embed(minimized_input)
         semantic_id = hashlib.sha256(f"{key.key}|{minimized_input}".encode("utf-8")).hexdigest()
         with self._connect() as conn:
             conn.execute(
@@ -163,26 +142,27 @@ class CacheStore:
         model_id: str,
         minimized_input: str,
         threshold: float,
-    ) -> tuple[Optional[CacheEntry], float]:
+    ) -> Optional[SemanticCacheMatch]:
         """Return the nearest semantic cache entry above threshold."""
         if not self.policy.enabled:
-            return None, 0.0
-        query_embedding = self.embed_text(minimized_input)
+            return None
+        embedded = self.embedding_provider.embed_measured(minimized_input)
+        query_embedding = embedded.vector
         best_row = None
         best_score = 0.0
         with self._connect() as conn:
             rows = conn.execute(
                 "SELECT cache_key,step_id,response,input_tokens,output_tokens,latency_ms,"
-                "created_at,embedding FROM semantic_cache_entries WHERE step_id=? AND model_id=?",
+                "created_at,embedding,minimized_input FROM semantic_cache_entries WHERE step_id=? AND model_id=?",
                 (step_id, model_id),
             ).fetchall()
             for row in rows:
-                score = self._cosine(query_embedding, json.loads(row[7]))
+                score = cosine_similarity(query_embedding, json.loads(row[7]))
                 if score > best_score:
                     best_score = score
                     best_row = row
             if best_row is None or best_score < threshold:
-                return None, best_score
+                return None
             conn.execute(
                 "UPDATE cache_entries SET hit_count=hit_count+1 WHERE key=?",
                 (best_row[0],),
@@ -199,7 +179,13 @@ class CacheStore:
             expires_at=None,
             hit_count=1,
         )
-        return entry, best_score
+        return SemanticCacheMatch(
+            entry=entry,
+            similarity=best_score,
+            previous_input=best_row[8],
+            embedding_latency_ms=embedded.latency_ms,
+            embedding_calls=embedded.calls,
+        )
 
     def invalidate(self, key: CacheKey) -> bool:
         """Remove a single entry. Return True if it existed."""
