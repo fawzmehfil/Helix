@@ -1,28 +1,29 @@
-# Python
+# Local secrets
+.env
+
+# Virtual environments
+venv/
+
+# Python caches
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
-
-# Virtual env
-venv/
-.env
-
-# Caches
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
 
-# Build
+# Build artifacts
 *.egg-info/
 build/
 dist/
 
+# Local benchmark outputs
+benchmark_results/
+results_*.json
+
 # Logs / temp
 *.log
-
-# Benchmark outputs
-results_*.json
 
 # OS
 .DS_Store

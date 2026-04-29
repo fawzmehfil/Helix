@@ -1,0 +1,68 @@
+{
+  "workflow_id": "demo_real_partial_v1",
+  "baseline_calls": 10,
+  "baseline_tokens": 1196,
+  "baseline_cost_usd": 0.00032025,
+  "baseline_latency_ms": 11380.855665978743,
+  "optimized_calls": 2,
+  "optimized_tokens": 112,
+  "optimized_cost_usd": 3.975e-05,
+  "optimized_latency_ms": 1834.5023329893593,
+  "calls_avoided": 8,
+  "cost_saved_usd": 0.0002805,
+  "cost_saved_pct": 87.58782201405153,
+  "tokens_saved": 1084,
+  "tokens_saved_pct": 90.63545150501672,
+  "latency_saved_ms": 9546.353332989383,
+  "latency_saved_pct": 83.88080486361574,
+  "exact_cache_hits": 4,
+  "semantic_hits": 0,
+  "nodes_executed": 1,
+  "nodes_reused": 4,
+  "reuse_rate_pct": 80.0,
+  "recomputation_ratio_pct": 20.0,
+  "raw_input_tokens": 485,
+  "minimized_input_tokens": 206,
+  "context_reduction_pct": 57.52577319587628,
+  "top_savings_nodes": [
+    {
+      "step_id": "qc_static_fields",
+      "decision": "cache_hit",
+      "calls_saved": 2,
+      "tokens_saved": 347,
+      "cost_saved_usd": 8.715e-05,
+      "latency_saved_ms": 3767.3605419986416
+    },
+    {
+      "step_id": "summarize_change",
+      "decision": "cache_hit",
+      "calls_saved": 2,
+      "tokens_saved": 378,
+      "cost_saved_usd": 8.685e-05,
+      "latency_saved_ms": 2269.6964999777265
+    },
+    {
+      "step_id": "classify_document",
+      "decision": "cache_hit",
+      "calls_saved": 2,
+      "tokens_saved": 255,
+      "cost_saved_usd": 5.9399999999999994e-05,
+      "latency_saved_ms": 1593.731041008141
+    },
+    {
+      "step_id": "extract_metadata",
+      "decision": "cache_hit",
+      "calls_saved": 2,
+      "tokens_saved": 80,
+      "cost_saved_usd": 3.0449999999999998e-05,
+      "latency_saved_ms": 1540.1300419762265
+    }
+  ],
+  "recommendations": [
+    "Projection is removing repeated context; apply input_projection to similar downstream nodes."
+  ],
+  "warnings": [],
+  "notes": [
+    "extract_line_items: context minimization net negative (-5 tokens)"
+  ]
+}

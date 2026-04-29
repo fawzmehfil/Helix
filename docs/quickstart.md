@@ -6,6 +6,8 @@ Install Helix in editable mode:
 pip install -e ".[dev]"
 ```
 
+Helix eliminates redundant LLM calls. It reuses unchanged work, only recomputes what changed, and sends each step only the context it needs.
+
 Run a deterministic local execution benchmark:
 
 ```bash
@@ -36,7 +38,15 @@ Benchmark both modes:
 helix bench workflows/incremental_execution_demo.yaml
 ```
 
-The report separates call-level savings, exact cache reuse, semantic reuse, context minimization, and parallel execution metrics.
+The report separates call-level savings, exact cache reuse, optional semantic reuse, context minimization, and parallel execution metrics.
+
+Explain where savings came from:
+
+```bash
+helix profile workflows/incremental_execution_demo.yaml
+```
+
+`helix profile` consumes the existing benchmark output path and prints a Savings Profile with top saving nodes and recommendations.
 
 ## Execution Graph Visibility
 
@@ -63,11 +73,21 @@ Real benchmarks skip cleanly when API keys are missing.
 ## Demo Execution Graphs
 
 - `incremental_execution_demo.yaml`: incremental recomputation and projection-based invalidation narrowing
-- `semantic_execution_demo.yaml`: embedding-based approximate reuse
+- `semantic_execution_demo.yaml`: optional similar-work reuse
 - `parallel_execution_demo.yaml`: DAG scheduling with `--parallel`
 - `demo_execution_engine_showcase.yaml`: combined showcase
 - `demo_low_reuse.yaml`: failure case with little reuse
 - `demo_minimization_regression.yaml`: failure case where tiny prompts expose minimization overhead
+
+## Product Framing
+
+- Stop paying for the same LLM work over and over.
+- Eliminate redundant LLM calls.
+- Only recompute what changed.
+- Send each step only the context it needs.
+- Run independent steps in parallel.
+- Optional semantic reuse for similar work.
+- We do not optimize prompts. We eliminate redundant execution.
 
 ## JSON Artifacts
 
@@ -83,4 +103,5 @@ Artifacts include baseline totals, optimized totals, per-node metrics, context m
 - Provider embeddings add small overhead.
 - Parallelism is bounded by provider rate limits and dependency graph shape.
 - Provider-side KV reuse is simulated, not directly controlled.
+- Framework-specific LangChain/LangGraph adapters are not implemented yet.
 - Distributed execution is not implemented yet.

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "helix"
 version = "0.1.0"
-description = "Computation-aware execution optimizer for LLM agent workflows."
+description = "Execution engine that eliminates redundant LLM calls in multi-step AI workloads."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = ["click>=8.1", "pyyaml>=6.0", "rich>=13.0"]

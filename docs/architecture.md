@@ -1,6 +1,8 @@
 # Helix Architecture
 
-Helix is an execution engine for AI workloads. It optimizes workload execution by turning YAML into an execution graph, tracking node dependencies, and reusing prior computations whenever the resolved input is unchanged.
+Helix is an execution engine for AI workloads. It eliminates redundant LLM calls by turning YAML into an execution graph, tracking node dependencies, and reusing prior computations whenever the resolved input is unchanged.
+
+It is not a workflow builder, prompt optimizer, or agent framework. It sits underneath existing AI systems and optimizes execution.
 
 ## Execution Graph
 
@@ -33,6 +35,16 @@ Projection narrows invalidation boundaries. If a node only uses `extract_metadat
 ## Computation Store
 
 Exact reuse is hash-based. Semantic reuse is embedding-based and opt-in per node. Exact reuse is deterministic; semantic reuse is approximate and controlled by threshold plus review mode.
+
+Optimization priority:
+
+1. avoid provider calls
+2. reduce tokens
+3. reduce latency
+4. improve reuse rate
+5. improve context minimization
+
+Lower priorities must not harm higher ones.
 
 ## Execution Backends
 

@@ -258,7 +258,7 @@ def bench_cmd(
     show_graph: bool,
     semantic_review: str | None,
 ) -> None:
-    """Benchmark workload execution with and without Helix optimization."""
+    """Compare full execution against Helix redundant-call elimination."""
     workflow = WorkflowParser().parse_file(workflow_path)
     parsed_inputs = parse_inputs(inputs)
     temp_state = None
