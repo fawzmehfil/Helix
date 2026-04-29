@@ -1,4 +1,4 @@
-# Helix: Incremental execution for AI agents
+# Helix: An Execution Engine for Efficient AI Systems
 
 <div align="center">
   <img src="assets/helix.png" alt="logo" width="220" />

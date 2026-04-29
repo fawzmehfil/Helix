@@ -7,6 +7,7 @@ from io import StringIO
 from rich.console import Console
 from rich.table import Table
 
+from helix.benchmark_engine.aggregate import aggregate_warnings
 from helix.benchmark_engine.types import AttributionReport, BenchmarkResult
 from helix.workflow.types import RunResult
 
@@ -401,6 +402,73 @@ class ReportFormatter:
                 console.print(f"- {note}")
         return out.getvalue()
 
+    def format_repeat_report(
+        self,
+        reports: list[AttributionReport],
+        aggregate: dict[str, dict[str, float]],
+    ) -> str:
+        """Format repeated benchmark statistics."""
+        out = StringIO()
+        console = Console(file=out, force_terminal=False, width=100)
+        avg = aggregate["avg"]
+        std = aggregate["std"]
+        console.print("=== HELIX REPEAT REPORT ===")
+        console.print()
+        console.print(f"Runs: {len(reports)}")
+        console.print()
+        table = Table(show_header=True, header_style="bold", box=None)
+        table.add_column("Metric")
+        table.add_column("Baseline avg", justify="right")
+        table.add_column("Optimized avg", justify="right")
+        table.add_column("Std", justify="right")
+        table.add_column("Reduction", justify="right")
+        table.add_row(
+            "Latency",
+            f"{avg['baseline_latency_ms'] / 1000.0:.2f}s",
+            f"{avg['optimized_latency_ms'] / 1000.0:.2f}s",
+            f"{std['optimized_latency_ms'] / 1000.0:.2f}s",
+            self._savings(_pct_delta(avg["baseline_latency_ms"], avg["optimized_latency_ms"])),
+        )
+        table.add_row(
+            "Cost",
+            f"${avg['baseline_cost_usd']:.6f}",
+            f"${avg['optimized_cost_usd']:.6f}",
+            f"${std['optimized_cost_usd']:.6f}",
+            self._savings(_pct_delta(avg["baseline_cost_usd"], avg["optimized_cost_usd"]), cost=True),
+        )
+        table.add_row(
+            "Tokens",
+            f"{avg['baseline_tokens']:.0f}",
+            f"{avg['optimized_tokens']:.0f}",
+            f"{std['optimized_tokens']:.1f}",
+            self._savings(_pct_delta(avg["baseline_tokens"], avg["optimized_tokens"])),
+        )
+        table.add_row(
+            "Calls",
+            f"{avg['baseline_calls']:.1f}",
+            f"{avg['optimized_calls']:.1f}",
+            f"{std['optimized_calls']:.1f}",
+            self._savings(_pct_delta(avg["baseline_calls"], avg["optimized_calls"])),
+        )
+        console.print(table)
+        console.print()
+        console.print("Variance:")
+        console.print(f"- latency std: {std['optimized_latency_ms'] / 1000.0:.2f}s")
+        console.print(f"- cost std: ${std['optimized_cost_usd']:.6f}")
+        console.print(f"- tokens std: {std['optimized_tokens']:.1f}")
+        console.print()
+        console.print("Execution metrics:")
+        console.print(f"- reuse rate: {avg['reuse_rate_pct']:.1f}%")
+        console.print(f"- recomputation ratio: {avg['recomputation_ratio_pct']:.1f}%")
+        console.print(f"- context reduction: {avg['context_reduction_pct']:.1f}%")
+        warnings = aggregate_warnings(reports)
+        if warnings:
+            console.print()
+            console.print("Warnings:")
+            for warning in warnings:
+                console.print(f"- {warning}")
+        return out.getvalue()
+
     def format_run_result(self, result: RunResult) -> str:
         """Format a workflow run result."""
         out = StringIO()
@@ -422,3 +490,7 @@ class ReportFormatter:
             f"{result.mode}: latency={result.total_latency_ms:.0f}ms "
             f"tokens={result.total_tokens} nodes={result.steps_executed}"
         )
+
+
+def _pct_delta(baseline: float, optimized: float) -> float:
+    return ((baseline - optimized) / baseline * 100.0) if baseline else 0.0

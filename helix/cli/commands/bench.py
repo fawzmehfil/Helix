@@ -8,7 +8,7 @@ import tempfile
 
 import click
 
-from helix.benchmark_engine import BenchmarkRunner, ReportFormatter
+from helix.benchmark_engine import BenchmarkRunner, ReportFormatter, aggregate_reports, aggregate_warnings
 from helix.cli.commands._common import build_runner, console, parse_inputs
 from helix.config import HelixConfig
 from helix.exceptions import LLMClientError
@@ -173,8 +173,8 @@ def _result_json(result) -> dict:
     }
 
 
-def _write_json_report(path: str, report, backend: str, model: str) -> None:
-    payload = {
+def _report_json_payload(report, backend: str, model: str) -> dict:
+    return {
         "workflow_id": report.baseline.workflow_id,
         "backend": backend,
         "model": model,
@@ -222,6 +222,29 @@ def _write_json_report(path: str, report, backend: str, model: str) -> None:
         "warnings": report.warnings,
         "notes": report.notes,
     }
+
+
+def _write_json_report(path: str, report, backend: str, model: str) -> None:
+    payload = _report_json_payload(report, backend, model)
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, indent=2)
+
+
+def _write_repeat_json_report(
+    path: str,
+    reports: list,
+    aggregate: dict[str, dict[str, float]],
+    backend: str,
+    model: str,
+) -> None:
+    payload = {
+        "workflow_id": reports[0].baseline.workflow_id,
+        "backend": backend,
+        "model": model,
+        "runs": [_report_json_payload(report, backend, model) for report in reports],
+        "aggregate": aggregate,
+        "warnings": aggregate_warnings(reports),
+    }
     with open(path, "w", encoding="utf-8") as handle:
         json.dump(payload, handle, indent=2)
 
@@ -238,6 +261,7 @@ def _write_json_report(path: str, report, backend: str, model: str) -> None:
 @click.option("--json-out", default=None, help="Write benchmark results to a JSON artifact.")
 @click.option("--parallel", is_flag=True, help="Run optimized workflow with DAG-level parallel execution.")
 @click.option("--show-graph", is_flag=True, help="Show execution graph, parallel groups, and node decisions.")
+@click.option("--repeat", default=None, type=click.IntRange(1), help="Repeat the benchmark N times.")
 @click.option(
     "--semantic-review",
     default=None,
@@ -256,6 +280,7 @@ def bench_cmd(
     json_out: str | None,
     parallel: bool,
     show_graph: bool,
+    repeat: int | None,
     semantic_review: str | None,
 ) -> None:
     """Compare full execution against Helix redundant-call elimination."""
@@ -305,42 +330,70 @@ def bench_cmd(
                 optimized,
                 HelixConfig.default().cost_table,
             )
-            if parallel:
-                report = runner.run_parallel_comparison(workflow, measured_inputs)
-            else:
-                report = runner.run_real_comparison(workflow, measured_inputs, warmup_inputs)
             formatter = ReportFormatter()
-            console.print(
-                formatter.format_real_benchmark(report)
-                if verbose
-                else formatter.format_concise_report(report)
-            )
+            if repeat is not None:
+                reports = [
+                    runner.run_parallel_comparison(workflow, measured_inputs)
+                    if parallel
+                    else runner.run_real_comparison(workflow, measured_inputs, warmup_inputs)
+                    for _ in range(repeat)
+                ]
+                aggregate = aggregate_reports(reports)
+                console.print(formatter.format_repeat_report(reports, aggregate))
+                report = reports[-1]
+            else:
+                if parallel:
+                    report = runner.run_parallel_comparison(workflow, measured_inputs)
+                else:
+                    report = runner.run_real_comparison(workflow, measured_inputs, warmup_inputs)
+                console.print(
+                    formatter.format_real_benchmark(report)
+                    if verbose
+                    else formatter.format_concise_report(report)
+                )
             if show_graph:
                 console.print(_format_graph_visibility(workflow, report.optimized), markup=False)
             if json_out:
-                _write_json_report(json_out, report, selected_backend, model)
+                if repeat is not None:
+                    _write_repeat_json_report(json_out, reports, aggregate, selected_backend, model)
+                else:
+                    _write_json_report(json_out, report, selected_backend, model)
         else:
             baseline = build_runner(backend, baseline=True, cache_path=cache_path, graph_path=graph_path)
             optimized = build_runner(backend, baseline=False, cache_path=cache_path, graph_path=graph_path)
             if semantic_review:
                 optimized.optimizer.semantic_review_mode = semantic_review
             runner = BenchmarkRunner(baseline, optimized, HelixConfig.default().cost_table)
-            report = (
-                runner.run_parallel_comparison(workflow, parsed_inputs)
-                if parallel
-                else runner.run_comparison(workflow, parsed_inputs)
-            )
             formatter = ReportFormatter()
-            console.print(
-                formatter.format_attribution(report)
-                if verbose
-                else formatter.format_concise_report(report)
-            )
+            if repeat is not None:
+                reports = [
+                    runner.run_parallel_comparison(workflow, parsed_inputs)
+                    if parallel
+                    else runner.run_comparison(workflow, parsed_inputs)
+                    for _ in range(repeat)
+                ]
+                aggregate = aggregate_reports(reports)
+                report = reports[-1]
+                console.print(formatter.format_repeat_report(reports, aggregate))
+            else:
+                report = (
+                    runner.run_parallel_comparison(workflow, parsed_inputs)
+                    if parallel
+                    else runner.run_comparison(workflow, parsed_inputs)
+                )
+                console.print(
+                    formatter.format_attribution(report)
+                    if verbose
+                    else formatter.format_concise_report(report)
+                )
             if show_graph:
                 console.print(_format_graph_visibility(workflow, report.optimized), markup=False)
             if json_out:
                 model = report.baseline.per_step[0].model if report.baseline.per_step else backend
-                _write_json_report(json_out, report, backend, model)
+                if repeat is not None:
+                    _write_repeat_json_report(json_out, reports, aggregate, backend, model)
+                else:
+                    _write_json_report(json_out, report, backend, model)
     except LLMClientError as exc:
         console.print(str(exc))
         return

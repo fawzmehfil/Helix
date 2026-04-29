@@ -14,7 +14,11 @@ def test_openai_real_benchmark_runs_when_key_present():
     )
 
     assert result.exit_code == 0
-    assert "=== HELIX EXECUTION REPORT ===" in result.output
+    assert "=== HELIX REPORT ===" in result.output
+    assert "Latency:" in result.output
+    assert "Cost:" in result.output
+    assert "Tokens:" in result.output
+    assert "Calls:" in result.output
 
 
 @pytest.mark.skipif(not os.environ.get("ANTHROPIC_API_KEY"), reason="ANTHROPIC_API_KEY is not set")
@@ -25,4 +29,8 @@ def test_anthropic_real_benchmark_runs_when_key_present():
     )
 
     assert result.exit_code == 0
-    assert "=== HELIX EXECUTION REPORT ===" in result.output
+    assert "=== HELIX REPORT ===" in result.output
+    assert "Latency:" in result.output
+    assert "Cost:" in result.output
+    assert "Tokens:" in result.output
+    assert "Calls:" in result.output
