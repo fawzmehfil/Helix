@@ -49,6 +49,11 @@ def _force_workflow_model(workflow, model: str) -> None:
 @click.option("--parallel", is_flag=True, help="Profile optimized execution with DAG-level parallel execution.")
 @click.option("--json-out", default=None, help="Write savings profile to a JSON artifact.")
 @click.option(
+    "--raw-report-out",
+    default=None,
+    help="Write the benchmark_engine report used by the profiler to a JSON artifact.",
+)
+@click.option(
     "--semantic-review",
     default=None,
     type=click.Choice(["auto_accept", "auto_reject", "interactive"]),
@@ -64,6 +69,7 @@ def profile_cmd(
     graph_path: str | None,
     parallel: bool,
     json_out: str | None,
+    raw_report_out: str | None,
     semantic_review: str | None,
 ) -> None:
     """Explain where Helix eliminates redundant LLM work."""
@@ -125,6 +131,9 @@ def profile_cmd(
                 if parallel
                 else runner.run_comparison(workflow, parsed_inputs)
             )
+        if raw_report_out:
+            with open(raw_report_out, "w", encoding="utf-8") as handle:
+                json.dump(_report_json(report), handle, indent=2)
         profile = SavingsProfiler().analyze(report)
         console.print(SavingsProfileFormatter().format(profile))
         if json_out:
@@ -136,3 +145,121 @@ def profile_cmd(
     finally:
         if temp_state is not None:
             temp_state.cleanup()
+
+
+def _step_json(step) -> dict:
+    return {
+        "step_id": step.step_id,
+        "decision": step.decision.value,
+        "input_tokens": step.input_tokens,
+        "output_tokens": step.output_tokens,
+        "total_tokens": step.input_tokens + step.output_tokens,
+        "raw_input_tokens": step.raw_input_tokens,
+        "projected_input_tokens": step.projected_input_tokens,
+        "minimized_input_tokens": step.minimized_input_tokens,
+        "tokens_removed_by_projection": step.tokens_removed_by_projection,
+        "optimization_overhead_tokens": step.optimization_overhead_tokens,
+        "net_tokens_saved_by_minimization": step.net_tokens_saved_by_minimization,
+        "minimization_effective": step.minimization_effective,
+        "tokens_trimmed_by_budget": step.tokens_trimmed_by_budget,
+        "budget_applied": step.budget_applied,
+        "minimization_warnings": step.minimization_warnings,
+        "cache_hit": step.cache_hit,
+        "semantic_cache_hit": step.semantic_cache_hit,
+        "semantic_reuse_applied": step.semantic_reuse_applied,
+        "semantic_reuse_accepted": step.semantic_reuse_accepted,
+        "semantic_reuse_rejected": step.semantic_reuse_rejected,
+        "similarity_score": step.similarity_score,
+        "embedding_latency_ms": step.embedding_latency_ms,
+        "embedding_calls": step.embedding_calls,
+        "graph_reuse": step.graph_reuse,
+        "latency_ms": step.latency_ms,
+        "cost_usd": step.estimated_cost_usd,
+        "model": step.model,
+        "call_count": step.call_count,
+        "repair_attempted": step.repair_attempted,
+        "repair_successful": step.repair_successful,
+        "schema_validation_failed": step.schema_validation_failed,
+        "structured_output_failed": step.structured_output_failed,
+    }
+
+
+def _result_json(result) -> dict:
+    return {
+        "run_id": result.run_id,
+        "workflow_id": result.workflow_id,
+        "mode": result.mode,
+        "total_latency_ms": result.total_latency_ms,
+        "total_input_tokens": result.total_input_tokens,
+        "total_output_tokens": result.total_output_tokens,
+        "total_tokens": result.total_tokens,
+        "estimated_cost_usd": result.estimated_cost_usd,
+        "calls": result.calls,
+        "steps_executed": result.steps_executed,
+        "steps_cached": result.steps_cached,
+        "steps_graph_reused": result.steps_graph_reused,
+        "steps_skipped": result.steps_skipped,
+        "context_minimization": {
+            "raw_input_tokens": result.raw_input_tokens,
+            "projected_input_tokens": result.projected_input_tokens,
+            "minimized_input_tokens": result.minimized_input_tokens,
+            "tokens_removed_by_projection": result.tokens_removed_by_projection,
+            "optimization_overhead_tokens": result.optimization_overhead_tokens,
+            "net_tokens_saved_by_minimization": result.net_tokens_saved_by_minimization,
+            "minimization_effective": result.net_tokens_saved_by_minimization > 0,
+            "tokens_trimmed_by_budget": result.tokens_trimmed_by_budget,
+            "budget_applied_steps": result.budget_applied_steps,
+            "warnings": result.minimization_warnings,
+        },
+        "semantic_reuse": {
+            "hits": result.semantic_cache_hits,
+            "accepted": result.semantic_reuse_accepted,
+            "rejected": result.semantic_reuse_rejected,
+            "avg_similarity": result.avg_similarity_score,
+            "embedding_latency_ms": result.embedding_latency_ms,
+            "embedding_calls": result.embedding_calls,
+        },
+        "structured_output": {
+            "repair_attempts": result.repair_attempts,
+            "repair_successes": result.repair_successes,
+            "schema_validation_failures": result.schema_validation_failures,
+        },
+        "parallel": {
+            "sequential_estimated_latency_ms": result.sequential_estimated_latency_ms,
+            "actual_parallel_latency_ms": result.actual_parallel_latency_ms,
+            "critical_path_latency_ms": result.critical_path_latency_ms,
+            "parallel_speedup_factor": result.parallel_speedup_factor,
+            "max_concurrency": result.max_concurrency,
+            "parallel_steps_executed": result.parallel_steps_executed,
+        },
+        "per_step": [_step_json(step) for step in result.per_step],
+    }
+
+
+def _report_json(report) -> dict:
+    return {
+        "workflow_id": report.baseline.workflow_id,
+        "baseline": _result_json(report.baseline),
+        "optimized": _result_json(report.optimized),
+        "savings": {
+            "latency_saved_ms": report.latency_saved_ms,
+            "latency_saved_pct": report.latency_saved_pct,
+            "cost_saved_usd": report.cost_saved_usd,
+            "cost_saved_pct": report.cost_saved_pct,
+            "tokens_saved": report.tokens_saved,
+            "tokens_saved_pct": report.tokens_saved_pct,
+            "steps_reduced": report.steps_reduced,
+            "calls_avoided": report.calls_avoided,
+            "tokens_avoided": report.tokens_avoided,
+            "steps_eliminated": report.steps_eliminated,
+            "partial_recomputation_steps": report.partial_recomputation_steps,
+            "context_reuse_pct": report.context_reuse_pct,
+            "kv_simulation_pct": report.kv_simulation_pct,
+            "graph_reuse_pct": report.graph_reuse_pct,
+            "step_reduction_pct": report.step_reduction_pct,
+            "semantic_calls_avoided": report.semantic_calls_avoided,
+            "semantic_tokens_avoided": report.semantic_tokens_avoided,
+        },
+        "warnings": report.warnings,
+        "notes": report.notes,
+    }

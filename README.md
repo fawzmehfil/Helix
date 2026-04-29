@@ -1,4 +1,4 @@
-# Helix — Stop paying for the same LLM work over and over.
+# Helix: Incremental execution for AI agents
 
 <div align="center">
   <img src="assets/helix.png" alt="logo" width="220" />
