@@ -1,0 +1,166 @@
+workflow_id: customer_support_update_v1
+name: "Customer Support Ticket Update"
+description: "Agentic support pipeline where a billing ticket changes slightly and Helix reuses stable analysis while recomputing affected billing and response steps."
+default_model: gpt-4o-mini
+metadata:
+  warmup_inputs:
+    customer_id: "cus_4182"
+    customer_name: "Jordan Lee"
+    account_plan: "Pro monthly subscription"
+    account_status: "active account in good standing"
+    product_area: "billing"
+    stable_issue_summary: "Customer reports being charged twice for their monthly subscription and asks for help."
+    ticket_text: "Hi support, I was charged twice for my monthly subscription and need help getting this fixed."
+  measured_inputs:
+    customer_id: "cus_4182"
+    customer_name: "Jordan Lee"
+    account_plan: "Pro monthly subscription"
+    account_status: "active account in good standing"
+    product_area: "billing"
+    stable_issue_summary: "Customer reports being charged twice for their monthly subscription and asks for help."
+    ticket_text: "Hi support, I was charged twice for my monthly subscription yesterday. The duplicate charge is on invoice INV-2026-1042, and I need help getting this fixed."
+steps:
+  # Stable branch: this sees only the normalized support issue, so the invoice/date update should not change its cache key.
+  - step_id: classify_ticket
+    step_type: llm_call
+    compact: true
+    output_format: json
+    required_fields: ["issue_type", "urgency", "routing_team"]
+    output_schema:
+      type: object
+      properties:
+        issue_type: {type: string}
+        urgency: {type: string}
+        routing_team: {type: string}
+        rationale: {type: string}
+      required: ["issue_type", "urgency", "routing_team", "rationale"]
+    max_output_tokens: 80
+    messages:
+      - role: system
+        content: "Classify a SaaS support ticket as compact JSON."
+      - role: user
+        content: "product_area={product_area}; issue_summary={stable_issue_summary}"
+
+  # Stable branch: account context is unchanged between warmup and measured tickets, so this should reuse exactly.
+  - step_id: extract_customer_context
+    step_type: llm_call
+    compact: true
+    output_format: json
+    required_fields: ["customer_id", "plan", "status"]
+    output_schema:
+      type: object
+      properties:
+        customer_id: {type: string}
+        customer_name: {type: string}
+        plan: {type: string}
+        status: {type: string}
+        support_tier: {type: string}
+      required: ["customer_id", "plan", "status", "support_tier"]
+    max_output_tokens: 80
+    messages:
+      - role: system
+        content: "Extract stable customer account context as compact JSON."
+      - role: user
+        content: "customer_id={customer_id}; customer_name={customer_name}; plan={account_plan}; status={account_status}"
+
+  # Changed branch: the measured ticket adds yesterday and invoice INV-2026-1042, so this should recompute.
+  - step_id: extract_billing_facts
+    step_type: llm_call
+    compact: true
+    output_format: json
+    required_fields: ["billing_issue", "invoice_id", "charge_timing"]
+    output_schema:
+      type: object
+      properties:
+        billing_issue: {type: string}
+        invoice_id: {type: string}
+        charge_timing: {type: string}
+        duplicate_charge: {type: boolean}
+        evidence_needed: {type: string}
+      required: ["billing_issue", "invoice_id", "charge_timing", "duplicate_charge", "evidence_needed"]
+    max_output_tokens: 100
+    messages:
+      - role: system
+        content: "Extract billing facts from a support ticket as compact JSON."
+      - role: user
+        content: "{ticket_text}"
+
+  # Mixed branch: policy needs stable classification/context plus changed billing facts, so it recomputes only when relevant billing facts change.
+  - step_id: policy_check
+    step_type: llm_call
+    depends_on:
+      - classify_ticket
+      - extract_customer_context
+      - extract_billing_facts
+    input_projection:
+      classify_ticket:
+        fields: ["issue_type", "urgency", "routing_team"]
+      extract_customer_context:
+        fields: ["plan", "status", "support_tier"]
+      extract_billing_facts:
+        fields: ["billing_issue", "invoice_id", "charge_timing", "duplicate_charge"]
+    compact: true
+    output_format: json
+    required_fields: ["eligible_action", "escalation_required"]
+    output_schema:
+      type: object
+      properties:
+        eligible_action: {type: string}
+        escalation_required: {type: boolean}
+        policy_reason: {type: string}
+        next_step: {type: string}
+      required: ["eligible_action", "escalation_required", "policy_reason", "next_step"]
+    max_output_tokens: 100
+    messages:
+      - role: system
+        content: "Apply billing support policy. Use only the supplied fields."
+      - role: user
+        content: "classification={classify_ticket.output}; account={extract_customer_context.output}; billing={extract_billing_facts.output}"
+
+  # Response branch: changed invoice/date facts affect the customer-facing answer, so this should recompute.
+  - step_id: draft_response
+    step_type: llm_call
+    depends_on:
+      - extract_customer_context
+      - extract_billing_facts
+      - policy_check
+    input_projection:
+      extract_customer_context:
+        fields: ["customer_name", "plan"]
+      extract_billing_facts:
+        fields: ["invoice_id", "charge_timing", "duplicate_charge"]
+      policy_check:
+        fields: ["eligible_action", "escalation_required", "next_step"]
+    max_output_tokens: 140
+    messages:
+      - role: system
+        content: "Draft a concise, empathetic SaaS support reply."
+      - role: user
+        content: "customer={extract_customer_context.output.customer_name}; plan={extract_customer_context.output.plan}; invoice={extract_billing_facts.output.invoice_id}; timing={extract_billing_facts.output.charge_timing}; policy={policy_check.output}"
+
+  # QA branch: depends on the drafted answer and policy outcome, so it recomputes when the response changes.
+  - step_id: qa_response
+    step_type: llm_call
+    depends_on:
+      - draft_response
+      - policy_check
+    input_projection:
+      policy_check:
+        fields: ["eligible_action", "escalation_required", "next_step"]
+    compact: true
+    output_format: json
+    required_fields: ["approved", "tone", "accuracy"]
+    output_schema:
+      type: object
+      properties:
+        approved: {type: boolean}
+        tone: {type: string}
+        accuracy: {type: string}
+        revision_note: {type: string}
+      required: ["approved", "tone", "accuracy", "revision_note"]
+    max_output_tokens: 90
+    messages:
+      - role: system
+        content: "QA the support response for correctness, policy alignment, and tone."
+      - role: user
+        content: "policy={policy_check.output}; draft={draft_response.output}"

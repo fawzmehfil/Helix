@@ -20,3 +20,7 @@ workloads:
     name: token_minimization
     category: context
     description: Tests projection and token reduction
+  - path: workflows/customer_support_update.yaml
+    name: customer_support_update
+    category: agentic_support
+    description: Agentic customer support ticket update with stable classification/context and changed billing facts

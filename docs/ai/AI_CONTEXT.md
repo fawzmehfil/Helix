@@ -90,28 +90,27 @@ Lower priorities must not harm higher priorities. Example: context minimization 
 
 ## Latest Headline Benchmark
 
-Source: `benchmark_results/20260427_202806/results_real_partial.json`
+Source: `benchmark_results/20260430_191509/demo_real_partial.json`
 
-Real OpenAI benchmark, `gpt-4o-mini`, `demo_real_partial.yaml`:
+Real OpenAI repeat benchmark, `gpt-4o-mini`, `demo_real_partial.yaml`, repeat=3, aggregate averages:
 
 ```text
-Latency: 14.90s -> 1.59s (-89.4%)
-Cost:    $0.000340 -> $0.000057 (-83.2%)
-Tokens:  1231 -> 141 (-88.5%)
-Calls:   10 -> 2
+Latency: 14.80s -> 3.46s (-76.6%)
+Cost:    $0.000356 -> $0.000086 (-75.9%)
+Tokens:  1263.3 -> 231.7 (-81.7%)
+Calls:   10.0 -> 2.7 (-73.3%)
 ```
 
 Derived execution metrics:
 
-- calls avoided: 8
-- exact cache hits: 4
-- reuse rate: 80.0%
-- recomputation ratio: 20.0%
-- context minimization: 539 raw -> 205 final tokens
-- net context tokens saved: 334
-- context minimization reduction: 62.0%
+- reuse rate: 73.3%
+- recomputation ratio: 26.7%
+- context minimization reduction: 48.2%
+- warnings: none
 
-Semantic reuse benchmark, `demo_semantic_reuse.yaml`:
+Latest real suite report: `benchmark_results/20260430_191509/REPORT.md`.
+
+Older semantic reuse smoke benchmark, `benchmark_results/20260429_023259/results_semantic.json`, `demo_semantic_reuse.yaml`:
 
 - baseline calls: 1
 - optimized calls: 0
@@ -131,7 +130,9 @@ Semantic reuse benchmark, `demo_semantic_reuse.yaml`:
 - real OpenAI/Anthropic benchmarking
 - deterministic fake backend for local tests
 - per-node and aggregate metrics for latency, tokens, cost, calls, reuse, semantic hits, repairs, and warnings
-- JSON benchmark artifacts
+- repeat benchmarking with JSON `runs` plus `aggregate {avg,std,min,max}`
+- benchmark suite manifest and Markdown `REPORT.md` generation from existing JSON artifacts
+- customer support update demo showing stable agent steps vs changed billing facts
 
 ## Current Limitations
 
@@ -140,8 +141,11 @@ Semantic reuse benchmark, `demo_semantic_reuse.yaml`:
 - no distributed execution yet
 - semantic reuse requires threshold and review tuning
 - real benchmarking depends on provider API credentials, latency variance, and rate limits
+- repeat suite shows provider latency can regress even when calls/tokens/cost improve; interpret latency with variance and warnings
+- low-reuse workloads may show tiny token/cost/latency regressions, which is expected failure-case evidence
 - parallel execution is level-based, not a full work-stealing scheduler
 - provider-side KV cache access is not controlled directly
+- report generator reads existing repeat JSON only; it does not validate benchmark freshness or run benchmarks
 
 ## Hard Rules For Future AI Sessions
 
@@ -150,7 +154,7 @@ Semantic reuse benchmark, `demo_semantic_reuse.yaml`:
 - Do not redesign the architecture unless explicitly requested.
 - Do not print, read, modify, or commit `.env`.
 - Do not hardcode API keys.
-- Use `./scripts/run_real_benchmarks.sh` for real validation.
+- Use `./scripts/run_benchmark_suite.sh --real` for suite proof artifacts; use `./scripts/run_real_benchmarks.sh` for legacy targeted real validation.
 - Save real benchmark outputs under `benchmark_results/`.
 - Never fabricate or simulate benchmark results.
 - Do not use unmeasured benchmark numbers.

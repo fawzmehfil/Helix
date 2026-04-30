@@ -10,45 +10,47 @@ Use this file when validating Helix changes. Never fabricate results.
 - Terminal summaries are useful, but final reports must cite JSON-derived values.
 - Do not read, print, modify, or commit `.env`.
 
-## Latest Known Real Benchmark
+## Latest Real Benchmark Suite
 
-Source: `benchmark_results/20260427_202806/results_real_partial.json`
+Source: `benchmark_results/20260430_191509/`
 
-`demo_real_partial.yaml`, OpenAI `gpt-4o-mini`:
+Generated report: `benchmark_results/20260430_191509/REPORT.md`
 
-```text
-Latency: 14.90s -> 1.59s (-89.4%)
-Cost:    $0.000340 -> $0.000057 (-83.2%)
-Tokens:  1231 -> 141 (-88.5%)
-Calls:   10 -> 2
-```
+OpenAI `gpt-4o-mini`, repeat=3, aggregate averages:
 
-Public framing from this result:
+| Workflow | Calls | Cost | Tokens | Latency | Reuse | Notes |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| `demo_real_partial.yaml` | 10.0 -> 2.7 (-73.3%) | $0.000356 -> $0.000086 (-75.9%) | 1263.3 -> 231.7 (-81.7%) | 14.80s -> 3.46s (-76.6%) | 73.3% | no warnings |
+| `demo_realistic_pipeline.yaml` | 10.0 -> 8.7 (-13.3%) | $0.000514 -> $0.000489 (-4.8%) | 1786.7 -> 1600.7 (-10.4%) | 14.53s -> 16.09s (+10.7%) | 11.1% | latency warnings |
+| `demo_low_reuse.yaml` | 4.0 -> 4.0 (0.0%) | $0.000229 -> $0.000229 (+0.0%) | 625.7 -> 626.0 (+0.1%) | 6.99s -> 7.44s (+6.5%) | 0.0% | expected failure case |
+| `demo_token_minimization.yaml` | 3.0 -> 0.0 (-100.0%) | $0.000432 -> $0.000000 (-100.0%) | 993.0 -> 0.0 (-100.0%) | 12.18s -> 0.00s (-100.0%) | 100.0% | no warnings |
 
-- fewer calls: 10 -> 2
-- fewer tokens: 1231 -> 141
-- lower latency: 14.90s -> 1.59s
-- lower cost: $0.000340 -> $0.000057
+Current headline workload: `demo_real_partial.yaml`.
+
+Public framing from this suite result:
+
+- fewer calls: 10.0 -> 2.7
+- fewer tokens: 1263.3 -> 231.7
+- lower latency: 14.80s -> 3.46s
+- lower cost: $0.000356 -> $0.000086
 
 Do not generalize this exact result to all workloads.
 
-Derived:
+Derived for `demo_real_partial.yaml`:
 
-- calls avoided: 8
-- exact cache hits: 4
-- reuse rate: 80.0%
-- recomputation ratio: 20.0%
-- context minimization: 539 raw -> 205 final tokens
-- context minimization reduction: 62.0%
+- calls reduction: 73.3%
+- reuse rate: 73.3%
+- recomputation ratio: 26.7%
+- context minimization reduction: 48.2%
 
-Source: `benchmark_results/20260427_202806/results_semantic.json`
+Latest semantic-only smoke source: `benchmark_results/20260429_023259/results_semantic.json`
 
 `demo_semantic_reuse.yaml`, OpenAI `gpt-4o-mini`:
 
 - calls: 1 -> 0
-- latency: 1.09s -> 0.00s
-- tokens: 54 -> 0
-- cost: $0.000019 -> $0
+- latency: 1.18s -> 0.00s
+- tokens: 58 -> 0
+- cost: $0.000022 -> $0
 - semantic cache hits: 1
 - accepted: 1
 - avg similarity: 1.0
@@ -63,14 +65,23 @@ Source: `benchmark_results/20260427_202806/results_semantic.json`
 - `demo_low_reuse.yaml`: failure case; unique inputs should show little/no reuse benefit.
 - `demo_minimization_regression.yaml`: failure case; tiny prompts can make optimization overhead visible.
 - `demo_realistic_pipeline.yaml`: production-like document workload with multiple dependent branches.
+- `customer_support_update.yaml`: agentic support ticket update; stable classification/account context, changed billing facts.
 - `incremental_execution_demo.yaml`: presentation-name alias for partial recomputation.
 - `semantic_execution_demo.yaml`: presentation-name alias for semantic reuse.
 - `parallel_execution_demo.yaml`: presentation-name alias for parallel execution.
 - `demo_execution_engine_showcase.yaml`: combined showcase.
 
-## Mandatory Real Benchmark Command
+## Benchmark Suite Commands
 
-Use only the project script for real benchmark validation:
+Preferred proof artifact command:
+
+```bash
+./scripts/run_benchmark_suite.sh --real
+```
+
+This reads `benchmarks/benchmark_suite.yaml`, writes repeat JSON files under `benchmark_results/<timestamp>/`, and generates `REPORT.md`.
+
+Legacy targeted real benchmark command:
 
 ```bash
 ./scripts/run_real_benchmarks.sh
@@ -86,7 +97,7 @@ Rules:
 
 ## Direct Real Commands
 
-The script currently runs these commands internally:
+The targeted script currently runs these commands internally:
 
 ```bash
 helix bench workflows/demo_real_partial.yaml --real --backend openai --isolated --json-out results_real_partial.json
@@ -108,6 +119,7 @@ mypy helix/ --ignore-missing-imports
 Useful local smoke checks:
 
 ```bash
+./scripts/run_benchmark_suite.sh
 helix bench workflows/demo_chain.yaml
 helix bench workflows/demo_token_minimization.yaml --json-out results_token_minimization.json
 helix bench workflows/demo_semantic_reuse.yaml
@@ -167,3 +179,5 @@ Expected failure cases:
 - low reuse workloads should show limited benefit
 - tiny prompts may show minimization overhead
 - semantic reuse can be rejected or disabled by threshold/review mode
+- provider latency can regress in repeat suites even when calls/tokens/cost improve
+- report generator consumes existing repeat JSON only; stale or fake-mode results must be identified by `backend`/`model`

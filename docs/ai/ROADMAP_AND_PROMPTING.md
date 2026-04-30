@@ -16,6 +16,8 @@ See `AI_CONTEXT.md` for protected invariants and optimization priority order.
 - Parallel DAG execution: level-based concurrent execution.
 - README/demo polish: execution-engine positioning and showcase demos.
 - Credibility hardening: realistic/failure workflows and documented limitations.
+- Phase 7 benchmark credibility: `--repeat N`, aggregate avg/std/min/max JSON, suite runner.
+- Phase 8A proof artifacts: benchmark suite manifest, Markdown `REPORT.md` generator, customer support update demo.
 
 ## Product Direction
 
@@ -45,7 +47,43 @@ Messaging guardrails:
 - Do not claim unsupported integrations.
 - Do not imply provider-side KV cache control.
 
-## Phase 6: Evaluator-Optimizer Loops
+## Recommended Next Phase: Phase 8B Result Curation And Stability
+
+Goal:
+
+- tighten benchmark suite interpretation, reduce noise, and make proof artifacts easier to compare over time.
+
+Non-goals:
+
+- no execution behavior changes unless separately scoped
+- no new metrics outside `benchmark_engine`
+- no UI/charts before Markdown reports are stable
+
+Likely implementation:
+
+- compare latest report against previous real suite JSON
+- add explicit fake vs real labels in generated reports if needed
+- improve manifest metadata without changing workflow semantics
+- document expected failure-case thresholds
+
+Success criteria:
+
+- fresh AI session can identify latest real vs local/fake results
+- report explains latency variance/regression warnings clearly
+- suite artifacts remain reproducible from `benchmarks/benchmark_suite.yaml`
+- tests/lint/typecheck pass
+
+Validation:
+
+```bash
+pytest tests/ -x -q
+ruff check helix/ tests/ benchmarks/
+mypy helix/ --ignore-missing-imports
+./scripts/run_benchmark_suite.sh
+./scripts/run_benchmark_suite.sh --real
+```
+
+## Future Phase: Evaluator-Optimizer Loops
 
 Goal:
 
@@ -81,7 +119,7 @@ mypy helix/ --ignore-missing-imports
 ./scripts/run_real_benchmarks.sh
 ```
 
-## Phase 7: LangChain/LangGraph Adapters
+## Future Phase: LangChain/LangGraph Adapters
 
 Goal:
 
@@ -116,7 +154,7 @@ mypy helix/ --ignore-missing-imports
 
 Run real benchmarks only if adapter changes affect execution behavior.
 
-## Phase 8: Distributed Execution
+## Future Phase: Distributed Execution
 
 Goal:
 
@@ -199,7 +237,8 @@ Do not remove existing features.
 Use docs/ai/* as source of truth.
 
 Do not read, print, modify, or commit .env.
-Use ./scripts/run_real_benchmarks.sh for real validation when execution changes.
+Use ./scripts/run_benchmark_suite.sh --real for suite proof artifacts when execution changes.
+Use ./scripts/run_real_benchmarks.sh for legacy targeted real validation.
 Read benchmark numbers from benchmark_results/<latest_timestamp>/ JSON files.
 
 Optimize for execution efficiency:

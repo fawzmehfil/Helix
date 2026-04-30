@@ -1,0 +1,52 @@
+{
+  "workflow_id": "customer_support_update_v1",
+  "baseline_calls": 11,
+  "baseline_tokens": 2269,
+  "baseline_cost_usd": 0.0006728999999999999,
+  "baseline_latency_ms": 21239.81187393656,
+  "optimized_calls": 7,
+  "optimized_tokens": 1258,
+  "optimized_cost_usd": 0.00039119999999999997,
+  "optimized_latency_ms": 11249.995165038854,
+  "calls_avoided": 4,
+  "cost_saved_usd": 0.00028169999999999996,
+  "cost_saved_pct": 41.86357556843513,
+  "tokens_saved": 1011,
+  "tokens_saved_pct": 44.55707360070515,
+  "latency_saved_ms": 9989.816708897706,
+  "latency_saved_pct": 47.03345193540176,
+  "exact_cache_hits": 2,
+  "semantic_hits": 0,
+  "nodes_executed": 4,
+  "nodes_reused": 2,
+  "reuse_rate_pct": 33.33333333333333,
+  "recomputation_ratio_pct": 66.66666666666666,
+  "raw_input_tokens": 573,
+  "minimized_input_tokens": 437,
+  "context_reduction_pct": 23.7347294938918,
+  "top_savings_nodes": [
+    {
+      "step_id": "extract_customer_context",
+      "decision": "cache_hit",
+      "calls_saved": 2,
+      "tokens_saved": 286,
+      "cost_saved_usd": 8.655e-05,
+      "latency_saved_ms": 2728.4018339705653
+    },
+    {
+      "step_id": "classify_ticket",
+      "decision": "cache_hit",
+      "calls_saved": 2,
+      "tokens_saved": 249,
+      "cost_saved_usd": 7.424999999999999e-05,
+      "latency_saved_ms": 3074.0547489840537
+    }
+  ],
+  "recommendations": [
+    "Projection is removing repeated context; apply input_projection to similar downstream nodes."
+  ],
+  "warnings": [],
+  "notes": [
+    "extract_billing_facts: context minimization net negative (-5 tokens)"
+  ]
+}

@@ -1,7 +1,8 @@
 # Helix: An Execution Engine for Efficient AI Systems
 
-<div align="center">
-  <img src="assets/helix.png" alt="logo" width="220" />
+<div align="center" style="display: flex; justify-content: center; gap: 20px;">
+  <img src="assets/helix.png" alt="logo black" width="220"/>
+  <img src="assets/helix_white.png" alt="logo white" width="220"/>
 </div>
 
 Cut your agent costs by 40–80% by eliminating redundant LLM calls, without changing your system.

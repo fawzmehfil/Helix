@@ -67,14 +67,24 @@ Key files:
 - calculates cost
 - formats CLI reports
 - writes JSON benchmark artifacts through CLI helpers
+- repeat aggregation remains benchmark-engine owned
 
 Key files:
 
 - `runner.py`
 - `collector.py`
 - `formatter.py`
+- `aggregate.py`
 - `cost.py`
 - `types.py`
+
+### `benchmarks/` and `scripts/`
+
+- `benchmarks/benchmark_suite.yaml`: manifest for reproducible benchmark suites
+- `benchmarks/generate_report.py`: reads existing repeat JSON and writes `REPORT.md`
+- `scripts/run_benchmark_suite.sh`: runs manifest workloads and then generates the report
+
+Report generation must not call providers or recompute metrics; it only formats JSON-derived values.
 
 ### `helix/api_clients/`
 
@@ -123,6 +133,7 @@ workflow YAML
   -> cache + graph persistence
   -> BenchmarkCollector
   -> CLI report / JSON artifact
+  -> optional benchmark suite REPORT.md from saved JSON
 ```
 
 Critical boundary: execution metrics flow through `benchmark_engine/`. Do not invent benchmark numbers in CLI code or docs.
