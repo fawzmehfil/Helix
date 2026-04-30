@@ -1,0 +1,22 @@
+suite_id: helix_core_benchmark_v1
+description: Core Helix benchmark suite
+repeat: 3
+backend: openai
+model: gpt-4o-mini
+workloads:
+  - path: workflows/demo_real_partial.yaml
+    name: partial_recompute
+    category: partial
+    description: Small input change with high reuse expected
+  - path: workflows/demo_realistic_pipeline.yaml
+    name: realistic_pipeline
+    category: mixed
+    description: Multi-step pipeline with partial reuse
+  - path: workflows/demo_low_reuse.yaml
+    name: low_reuse
+    category: failure_case
+    description: Inputs differ significantly; minimal reuse expected
+  - path: workflows/demo_token_minimization.yaml
+    name: token_minimization
+    category: context
+    description: Tests projection and token reduction

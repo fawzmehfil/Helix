@@ -2,7 +2,8 @@
 set -euo pipefail
 
 real=false
-repeat=3
+manifest="benchmarks/benchmark_suite.yaml"
+repeat=$(awk '/^repeat:/ {print $2}' "$manifest")
 
 usage() {
   echo "Usage: $0 [--real] [--repeat N]"
@@ -33,16 +34,20 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-workflows=(
-  "workflows/demo_real_partial.yaml"
-  "workflows/demo_realistic_pipeline.yaml"
-  "workflows/demo_low_reuse.yaml"
-  "workflows/demo_token_minimization.yaml"
-)
+workflows=()
+while IFS= read -r workflow; do
+  workflows+=("$workflow")
+done < <(awk '/^  - path:/ {print $3}' "$manifest")
 
 tmpdir=$(mktemp -d)
 trap 'rm -rf "$tmpdir"' EXIT
 export HELIX_RUNS_DIR="$tmpdir/runs"
+timestamp=$(date +"%Y%m%d_%H%M%S")
+results_dir="benchmark_results/$timestamp"
+mkdir -p "$results_dir"
+
+echo "Output directory: $results_dir"
+echo ""
 
 printf "%-38s | %8s | %8s | %8s | %9s\n" "Workflow" "Cost ↓" "Calls ↓" "Tokens ↓" "Latency ↓"
 printf "%-38s-+-%8s-+-%8s-+-%8s-+-%9s\n" \
@@ -50,7 +55,7 @@ printf "%-38s-+-%8s-+-%8s-+-%8s-+-%9s\n" \
 
 for workflow in "${workflows[@]}"; do
   name=$(basename "$workflow" .yaml)
-  output="$tmpdir/$name.json"
+  output="$results_dir/$name.json"
   command_output="$tmpdir/$name.out"
   cache_path="$tmpdir/$name-cache.db"
   graph_path="$tmpdir/$name-graph.db"
@@ -101,3 +106,11 @@ print(
 )
 ' "$workflow" "$output"
 done
+
+python_bin="python"
+if ! command -v "$python_bin" >/dev/null 2>&1; then
+  python_bin="python3"
+fi
+"$python_bin" benchmarks/generate_report.py "$results_dir" >/dev/null
+echo ""
+echo "Report: $results_dir/REPORT.md"
