@@ -18,10 +18,15 @@ See `AI_CONTEXT.md` for protected invariants and optimization priority order.
 - Credibility hardening: realistic/failure workflows and documented limitations.
 - Phase 7 benchmark credibility: `--repeat N`, aggregate avg/std/min/max JSON, suite runner.
 - Phase 8A proof artifacts: benchmark suite manifest, Markdown `REPORT.md` generator, customer support update demo.
+- Phase 9A LangGraph adapter: node-level caching for compiled LangGraph graphs.
+- Phase 9B LangGraph trace + summary: per-node decisions, reasons, reuse rate, JSON export.
+- Phase 9C LangGraph metrics: wrapped OpenAI calls, per-node/aggregate calls, tokens, cost, latency.
 
 ## Product Direction
 
 Helix is an execution engine for AI workloads.
+
+Current direction: Helix is transitioning from YAML-first proof workflows to LangGraph-first execution for real agent workloads. YAML remains supported and benchmarked; LangGraph is the primary integration path for agent runtime optimization.
 
 Public headline: Stop paying for the same LLM work over and over.
 
@@ -47,7 +52,49 @@ Messaging guardrails:
 - Do not claim unsupported integrations.
 - Do not imply provider-side KV cache control.
 
-## Recommended Next Phase: Phase 8B Result Curation And Stability
+## Current LangGraph-First Roadmap
+
+- LangGraph adapter: DONE
+- LangGraph trace + summary: DONE
+- LangGraph metrics: DONE
+- LangGraph-first usage and docs: IN PROGRESS
+- Automatic graph extraction: NEXT
+
+## Recommended Next Phase: Automatic Graph Extraction
+
+Goal:
+
+- reduce manual adapter setup and make LangGraph-first usage easier for existing agent code.
+
+Non-goals:
+
+- no execution behavior changes
+- no cache key changes
+- no benchmark_engine changes
+- no UI
+
+Likely implementation:
+
+- inspect supported LangGraph compiled graph metadata
+- expose safe helper(s) for adapter initialization and node naming
+- document limitations where LangGraph internals are unstable
+- preserve explicit wrapping as fallback
+
+Success criteria:
+
+- fresh users can wrap common LangGraph graphs with minimal code
+- trace and metrics still work
+- existing YAML and LangGraph tests pass
+
+Validation:
+
+```bash
+pytest tests/ -x -q
+ruff check helix/ tests/ benchmarks/
+mypy helix/ --ignore-missing-imports
+```
+
+## Future Phase: Result Curation And Stability
 
 Goal:
 
@@ -56,7 +103,7 @@ Goal:
 Non-goals:
 
 - no execution behavior changes unless separately scoped
-- no new metrics outside `benchmark_engine`
+- no new YAML benchmark metrics outside `benchmark_engine`
 - no UI/charts before Markdown reports are stable
 
 Likely implementation:
@@ -94,7 +141,7 @@ Non-goals:
 - no full agent framework
 - no prompt marketplace
 - no distributed execution
-- no LangChain/LangGraph adapter in this phase
+- no LangChain adapter in this phase
 
 Likely implementation:
 
@@ -119,11 +166,11 @@ mypy helix/ --ignore-missing-imports
 ./scripts/run_real_benchmarks.sh
 ```
 
-## Future Phase: LangChain/LangGraph Adapters
+## Future Phase: LangChain Adapter
 
 Goal:
 
-- let existing LangChain/LangGraph users run workloads through Helix execution optimization.
+- let existing LangChain users run workloads through Helix execution optimization.
 
 Non-goals:
 
@@ -139,7 +186,7 @@ Likely files:
 
 Success criteria:
 
-- small LangGraph-style graph maps to Helix execution graph
+- small LangChain-style graph maps to Helix execution graph
 - dependency boundaries remain explicit
 - existing YAML flows still pass
 - adapter is optional

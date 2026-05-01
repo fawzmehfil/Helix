@@ -10,7 +10,7 @@ Public framing: **Helix — Stop paying for the same LLM work over and over.**
 
 One-liner: Cut your agent costs by 40–80% by eliminating redundant LLM calls, without changing your system.
 
-Helix optimizes LLM-based execution graphs by tracking dependencies, caching intermediate computations, recomputing only changed nodes, minimizing context, and measuring real latency/cost/token impact.
+Helix optimizes LLM-based execution graphs by tracking dependencies, caching intermediate computations, recomputing only changed nodes, minimizing context, and measuring real latency/cost/token impact. Current development is moving from YAML-first proof workflows toward LangGraph-first runtime optimization for real agent systems.
 
 Developer mental model: **Bazel for LLM workloads**.
 
@@ -71,7 +71,8 @@ Do not break these guarantees:
 - cache key correctness: same resolved relevant input + model/config -> same key; changed relevant input -> different key; unrelated branches excluded
 - dependency-based recomputation: changed inputs invalidate only dependent nodes whose resolved inputs change
 - semantic reuse opt-in: approximate reuse only when a node declares `semantic_reuse: true`
-- `benchmark_engine` is the metric source of truth; CLI/JSON reports must derive from it
+- `benchmark_engine` is the metric source of truth for YAML benchmark flows; CLI/JSON reports must derive from it
+- LangGraph runtime metrics are adapter-local and must not be mixed into YAML benchmark reports
 - every execution change must preserve baseline vs optimized comparison
 - fake backend remains deterministic and keyless
 - `.env` is never read, printed, modified, or committed by AI sessions
@@ -133,11 +134,16 @@ Older semantic reuse smoke benchmark, `benchmark_results/20260429_023259/results
 - repeat benchmarking with JSON `runs` plus `aggregate {avg,std,min,max}`
 - benchmark suite manifest and Markdown `REPORT.md` generation from existing JSON artifacts
 - customer support update demo showing stable agent steps vs changed billing facts
+- LangGraph adapter for real agent runtime optimization
+- LangGraph node-level trace, run summary, and JSON export
+- LangGraph runtime metrics for wrapped OpenAI calls: calls, avoided calls, tokens, cost, latency
 
 ## Current Limitations
 
 - no evaluator-optimizer loop yet
-- no LangChain/LangGraph adapters yet
+- no LangChain adapter yet
+- LangGraph metrics are runtime summaries, not benchmark_engine benchmark artifacts
+- LangGraph token/cost metrics require nodes to use `helix_openai_call`; calls without response usage are skipped
 - no distributed execution yet
 - semantic reuse requires threshold and review tuning
 - real benchmarking depends on provider API credentials, latency variance, and rate limits

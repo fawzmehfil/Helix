@@ -19,6 +19,7 @@ from helix.graph_engine import ComputationGraph, GraphReuser
 from helix.kv_simulator import KVSimulator
 from helix.workflow.types import Workflow, WorkflowStep, WorkflowStepType
 
+from .llm_wrapper import LLMCallMetrics, capture_helix_metrics
 from .utils import (
     TraceEntry,
     compute_summary,
@@ -37,6 +38,45 @@ class LangGraphNodeEvent:
     decision: ExecutionDecisionType
     cache_key: str | None
     reason: str
+
+
+@dataclass
+class NodeMetrics:
+    """Runtime LLM metrics collected for one LangGraph node."""
+
+    calls_made: int = 0
+    calls_avoided: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    cost_usd: float = 0.0
+    latency_ms: float = 0.0
+
+    def record_call(self, metrics: LLMCallMetrics) -> None:
+        """Accumulate one measured LLM call."""
+        self.calls_made += metrics.calls_made
+        self.input_tokens += metrics.input_tokens
+        self.output_tokens += metrics.output_tokens
+        self.total_tokens += metrics.total_tokens
+        self.cost_usd += metrics.cost_usd
+        self.latency_ms += metrics.latency_ms
+
+    def record_avoided(self) -> None:
+        """Record one cached node execution."""
+        self.calls_avoided += 1
+
+    def to_dict(self) -> dict[str, int | float]:
+        """Return JSON-serializable metrics."""
+        return {
+            "calls_made": self.calls_made,
+            "calls_avoided": self.calls_avoided,
+            "input_tokens": self.input_tokens,
+            "output_tokens": self.output_tokens,
+            "total_tokens": self.total_tokens,
+            "tokens": self.total_tokens,
+            "cost_usd": self.cost_usd,
+            "latency_ms": self.latency_ms,
+        }
 
 
 class HelixLangGraphRunner:
@@ -60,8 +100,10 @@ class HelixLangGraphRunner:
         self.optimizer = optimizer or self._build_optimizer(cache_path, graph_path)
         self.last_run_events: list[LangGraphNodeEvent] = []
         self._trace: list[TraceEntry] = []
+        self._metrics: dict[str, NodeMetrics] = {}
         self._previous_inputs: dict[str, Any] = {}
         self._events_lock = threading.Lock()
+        self._metrics_lock = threading.Lock()
         self._optimizer_lock = threading.Lock()
         self._active_run_id = str(uuid.uuid4())
         self.graph = self._wrap_graph(graph)
@@ -175,6 +217,17 @@ class HelixLangGraphRunner:
         with self._events_lock:
             self._trace.append(entry)
 
+    def _node_metrics(self, step_id: str) -> NodeMetrics:
+        return self._metrics.setdefault(step_id, NodeMetrics())
+
+    def _record_call_metrics(self, step_id: str, metrics: LLMCallMetrics) -> None:
+        with self._metrics_lock:
+            self._node_metrics(step_id).record_call(metrics)
+
+    def _record_avoided_call(self, step_id: str) -> None:
+        with self._metrics_lock:
+            self._node_metrics(step_id).record_avoided()
+
     def _remember_input(self, step_id: str, node_input: Any) -> None:
         self._previous_inputs[step_id] = copy.deepcopy(node_input)
 
@@ -185,14 +238,17 @@ class HelixLangGraphRunner:
         )
         self._append_trace(self._trace_decision(step_id, node_input, decision))
         if decision.decision == ExecutionDecisionType.CACHE_HIT and decision.cache_entry:
+            self._record_avoided_call(step_id)
             self._remember_input(step_id, node_input)
             return decision.cache_entry.response
         if decision.decision == ExecutionDecisionType.GRAPH_REUSE and decision.graph_node:
+            self._record_avoided_call(step_id)
             self._remember_input(step_id, node_input)
             return decision.graph_node.response
 
         started = time.perf_counter()
-        output = ensure_cacheable_output(step_id, bound.invoke(node_input, config))
+        with capture_helix_metrics(lambda metrics: self._record_call_metrics(step_id, metrics)):
+            output = ensure_cacheable_output(step_id, bound.invoke(node_input, config))
         latency_ms = (time.perf_counter() - started) * 1000
         with self._optimizer_lock:
             self.optimizer.record_execution(decision, output, latency_ms)
@@ -206,14 +262,17 @@ class HelixLangGraphRunner:
         )
         self._append_trace(self._trace_decision(step_id, node_input, decision))
         if decision.decision == ExecutionDecisionType.CACHE_HIT and decision.cache_entry:
+            self._record_avoided_call(step_id)
             self._remember_input(step_id, node_input)
             return decision.cache_entry.response
         if decision.decision == ExecutionDecisionType.GRAPH_REUSE and decision.graph_node:
+            self._record_avoided_call(step_id)
             self._remember_input(step_id, node_input)
             return decision.graph_node.response
 
         started = time.perf_counter()
-        output = ensure_cacheable_output(step_id, await bound.ainvoke(node_input, config))
+        with capture_helix_metrics(lambda metrics: self._record_call_metrics(step_id, metrics)):
+            output = ensure_cacheable_output(step_id, await bound.ainvoke(node_input, config))
         latency_ms = (time.perf_counter() - started) * 1000
         with self._optimizer_lock:
             self.optimizer.record_execution(decision, output, latency_ms)
@@ -230,6 +289,7 @@ class HelixLangGraphRunner:
         """Invoke the wrapped LangGraph graph."""
         self.last_run_events = []
         self._trace = []
+        self._metrics = {}
         self._active_run_id = str(uuid.uuid4())
         return self.graph.invoke(input_data, **kwargs)
 
@@ -237,6 +297,7 @@ class HelixLangGraphRunner:
         """Invoke the wrapped LangGraph graph asynchronously."""
         self.last_run_events = []
         self._trace = []
+        self._metrics = {}
         self._active_run_id = str(uuid.uuid4())
         return await self.graph.ainvoke(input_data, **kwargs)
 
@@ -250,4 +311,37 @@ class HelixLangGraphRunner:
         return {
             "trace": [entry.to_dict() for entry in trace],
             "summary": compute_summary(trace),
+            "metrics": self.get_metrics_summary(),
+        }
+
+    def get_node_metrics(self) -> dict[str, dict[str, int | float]]:
+        """Return per-node runtime metrics for the most recent run."""
+        with self._metrics_lock:
+            return {step_id: metrics.to_dict() for step_id, metrics in self._metrics.items()}
+
+    def get_metrics_summary(self) -> dict[str, int | float]:
+        """Return aggregate runtime metrics for the most recent run."""
+        with self._metrics_lock:
+            node_metrics = list(self._metrics.values())
+        calls_made = sum(metrics.calls_made for metrics in node_metrics)
+        calls_avoided = sum(metrics.calls_avoided for metrics in node_metrics)
+        input_tokens = sum(metrics.input_tokens for metrics in node_metrics)
+        output_tokens = sum(metrics.output_tokens for metrics in node_metrics)
+        total_tokens = sum(metrics.total_tokens for metrics in node_metrics)
+        cost_usd = sum(metrics.cost_usd for metrics in node_metrics)
+        latency_ms = sum(metrics.latency_ms for metrics in node_metrics)
+        trace_summary = compute_summary(self.get_trace())
+        return {
+            "total_calls": calls_made,
+            "calls_made": calls_made,
+            "calls_avoided": calls_avoided,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_tokens": total_tokens,
+            "tokens": total_tokens,
+            "total_cost": cost_usd,
+            "cost_usd": cost_usd,
+            "total_latency": latency_ms,
+            "latency_ms": latency_ms,
+            "reuse_rate": trace_summary["reuse_rate"],
         }

@@ -72,6 +72,34 @@ On optimized execution:
 
 Cached nodes do not send provider prompts and should not create global prompt-regression warnings.
 
+## LangGraph Adapter Behavior
+
+LangGraph support is adapter-only:
+
+- `HelixLangGraphRunner` wraps a compiled LangGraph graph.
+- LangGraph still owns graph structure, scheduling, state merging, and control flow.
+- Each LangGraph node name becomes a Helix `step_id`.
+- The node input received from LangGraph is serialized and passed through existing Helix cache-key logic.
+- Cache hit returns the cached node output.
+- Miss executes the original LangGraph node normally and stores the output.
+
+Trace:
+
+- one `TraceEntry` per node decision
+- decision is `cache_hit` or `execute`
+- cache hit reason: `input unchanged`
+- miss reason: `no cache entry` or shallow `input changed: field`
+- JSON export includes trace and summary
+
+Runtime metrics:
+
+- adapter-local, not benchmark_engine metrics
+- collected only when nodes call `helix_openai_call`
+- uses actual OpenAI response `usage`
+- records calls made, calls avoided, input/output/total tokens, cost, latency
+- metrics do not affect cache decisions or execution order
+- calls without response usage are skipped for token/cost metrics
+
 ## Semantic Reuse Behavior
 
 Semantic reuse is opt-in per node:

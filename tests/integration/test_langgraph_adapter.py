@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from typing_extensions import TypedDict
 
 import pytest
 
 pytest.importorskip("langgraph")
+pytest.importorskip("openai")
 
 from langgraph.graph import END, START, StateGraph
 
 from helix.adapters.langgraph import HelixLangGraphRunner
+from helix.adapters.langgraph.llm_wrapper import helix_openai_call
 from helix.adapters.langgraph.utils import compute_summary
 from helix.execution_optimizer.types import ExecutionDecisionType
 
@@ -29,19 +33,45 @@ class TicketInput(TypedDict):
     ticket: str
 
 
+@dataclass
+class FakeUsage:
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+
+
+@dataclass
+class FakeOpenAIResponse:
+    usage: FakeUsage
+    model: str = "gpt-4o-mini"
+
+
+def _fake_openai_create(prompt_tokens: int = 10, completion_tokens: int = 5) -> FakeOpenAIResponse:
+    return FakeOpenAIResponse(
+        usage=FakeUsage(
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=prompt_tokens + completion_tokens,
+        )
+    )
+
+
 def test_langgraph_adapter_reuses_unchanged_node_and_recomputes_changed_path():
     calls: list[str] = []
 
     def classify_tone(state: ToneInput) -> dict[str, str]:
         calls.append("classify_tone")
+        helix_openai_call(_fake_openai_create, prompt_tokens=7, completion_tokens=3)
         return {"style": f"{state['tone']} support"}
 
     def extract_facts(state: TicketInput) -> dict[str, str]:
         calls.append("extract_facts")
+        helix_openai_call(_fake_openai_create, prompt_tokens=11, completion_tokens=4)
         return {"facts": state["ticket"].lower()}
 
     def draft_response(state: SupportState) -> dict[str, str]:
         calls.append("draft_response")
+        helix_openai_call(_fake_openai_create, prompt_tokens=13, completion_tokens=5)
         return {"response": f"{state['style']}: {state['facts']}"}
 
     builder = StateGraph(SupportState)
@@ -66,6 +96,7 @@ def test_langgraph_adapter_reuses_unchanged_node_and_recomputes_changed_path():
     trace = runner.get_trace()
     summary = compute_summary(trace)
     trace_json = runner.get_trace_json()
+    metrics = runner.get_metrics_summary()
     cache_trace = next(entry for entry in trace if entry.decision == "cache_hit")
 
     assert first["response"] == "friendly support: refund request for invoice 100"
@@ -95,3 +126,16 @@ def test_langgraph_adapter_reuses_unchanged_node_and_recomputes_changed_path():
     assert trace_json["summary"] == summary
     assert len(trace_json["trace"]) == 3
     assert trace_json["trace"][0]["step_id"] == trace[0].step_id
+    assert metrics["calls_made"] == 2
+    assert metrics["calls_avoided"] == 1
+    assert metrics["total_calls"] == 2
+    assert metrics["input_tokens"] == 24
+    assert metrics["output_tokens"] == 9
+    assert metrics["total_tokens"] == 33
+    assert metrics["tokens"] == 33
+    assert metrics["cost_usd"] > 0
+    assert metrics["latency_ms"] > 0
+    assert runner.get_node_metrics()["classify_tone"]["calls_made"] == 0
+    assert runner.get_node_metrics()["classify_tone"]["calls_avoided"] == 1
+    assert runner.get_node_metrics()["extract_facts"]["calls_made"] == 1
+    assert trace_json["metrics"] == metrics

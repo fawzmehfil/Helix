@@ -16,6 +16,7 @@ helix/
   kv_simulator/          simulated prefix-overlap/KV reuse estimates
   embeddings.py          embedding providers and cosine similarity helpers
   tokenization.py        provider-aware token counting
+  adapters/langgraph/    optional LangGraph node wrapper, trace, runtime metrics
   cli/                   `helix` command entry points
 ```
 
@@ -78,6 +79,20 @@ Key files:
 - `cost.py`
 - `types.py`
 
+### `helix/adapters/langgraph/`
+
+- wraps compiled LangGraph nodes without changing LangGraph control flow
+- maps each LangGraph node execution to one Helix cache decision
+- exposes node trace, run summary, and JSON export
+- collects runtime OpenAI metrics through `helix_openai_call`
+- keeps LangGraph runtime metrics separate from YAML `benchmark_engine`
+
+Key files:
+
+- `runner.py`
+- `utils.py`
+- `llm_wrapper.py`
+
 ### `benchmarks/` and `scripts/`
 
 - `benchmarks/benchmark_suite.yaml`: manifest for reproducible benchmark suites
@@ -136,7 +151,19 @@ workflow YAML
   -> optional benchmark suite REPORT.md from saved JSON
 ```
 
-Critical boundary: execution metrics flow through `benchmark_engine/`. Do not invent benchmark numbers in CLI code or docs.
+LangGraph data flow:
+
+```text
+compiled LangGraph
+  -> HelixLangGraphRunner
+  -> LangGraph schedules nodes normally
+  -> adapter intercepts node call
+  -> ExecutionOptimizer exact cache decision
+  -> original node call or cached output
+  -> trace + adapter-local runtime metrics
+```
+
+Critical boundary: YAML benchmark metrics flow through `benchmark_engine/`. LangGraph runtime metrics are adapter-local and must not be mixed into benchmark reports.
 
 ## Backend Abstraction
 
@@ -189,6 +216,7 @@ Important `helix bench` flags:
 - context minimization: `helix/workflow/runner.py`, `helix/workflow/types.py`
 - semantic reuse: `helix/embeddings.py`, `helix/execution_optimizer/`, `helix/cache_engine/`
 - benchmarking/reporting: `helix/benchmark_engine/`, `helix/cli/commands/bench.py`
+- LangGraph adapter tracing/metrics: `helix/adapters/langgraph/`
 - provider behavior: `helix/api_clients/`, `helix/tokenization.py`
 - CLI behavior: `helix/cli/commands/`
 - workflow schema fields: `helix/workflow/types.py`, `helix/workflow/parser.py`

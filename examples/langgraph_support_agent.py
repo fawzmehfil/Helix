@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import os
 from tempfile import TemporaryDirectory
+from typing import Any
 
 from rich.console import Console
 from typing_extensions import TypedDict
 
-from helix.adapters.langgraph import HelixLangGraphRunner
+from helix.adapters.langgraph import HelixLangGraphRunner, helix_openai_call
 from helix.adapters.langgraph.utils import compute_summary
 
 try:
@@ -57,11 +59,42 @@ def extract_billing_facts(state: BillingInput) -> dict[str, str]:
     return {"billing_facts": facts}
 
 
+def _openai_text_or_fallback(messages: list[dict[str, str]], fallback: str) -> str:
+    if not os.environ.get("OPENAI_API_KEY"):
+        return fallback
+    try:
+        from openai import OpenAI
+    except ImportError:
+        return fallback
+    try:
+        client = OpenAI()
+        response = helix_openai_call(
+            client.chat.completions.create,
+            model="gpt-4o-mini",
+            messages=messages,
+            temperature=0,
+        )
+    except Exception:
+        return fallback
+    choices = getattr(response, "choices", [])
+    if not choices:
+        return fallback
+    message: Any = getattr(choices[0], "message", None)
+    return str(getattr(message, "content", "") or fallback)
+
+
 def draft_response(state: TicketState) -> dict[str, str]:
-    response = (
+    fallback = (
         f"We classified this as {state['category']}. "
         f"Context: {state['context']}. "
         f"Billing facts: {state['billing_facts']}."
+    )
+    response = _openai_text_or_fallback(
+        [
+            {"role": "system", "content": "Draft a concise customer support response."},
+            {"role": "user", "content": fallback},
+        ],
+        fallback,
     )
     return {"response": response}
 
@@ -96,6 +129,13 @@ def print_run(console: Console, runner: HelixLangGraphRunner, label: str, result
     console.print(f"- executed: {summary['nodes_executed']}")
     console.print(f"- reuse rate: {summary['reuse_rate']:.0%}")
     console.print(f"- calls avoided: {summary['estimated_calls_avoided']}")
+    metrics = runner.get_metrics_summary()
+    console.print("\n[bold]--- Helix Metrics ---[/bold]")
+    console.print(f"- calls made: {metrics['calls_made']}")
+    console.print(f"- calls avoided: {metrics['calls_avoided']}")
+    console.print(f"- tokens used: {metrics['tokens']}")
+    console.print(f"- cost: ${metrics['cost_usd']:.6f}")
+    console.print(f"- latency: {metrics['latency_ms']:.2f} ms")
 
 
 def main() -> None:

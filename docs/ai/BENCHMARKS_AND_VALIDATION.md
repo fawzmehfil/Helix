@@ -8,6 +8,7 @@ Use this file when validating Helix changes. Never fabricate results.
 - No execution change is accepted without measurement.
 - JSON files under `benchmark_results/<timestamp>/` are the only trusted source for real benchmark numbers.
 - Terminal summaries are useful, but final reports must cite JSON-derived values.
+- LangGraph runtime metrics are not benchmark_engine results and must be reported separately.
 - Do not read, print, modify, or commit `.env`.
 
 ## Latest Real Benchmark Suite
@@ -55,6 +56,24 @@ Latest semantic-only smoke source: `benchmark_results/20260429_023259/results_se
 - accepted: 1
 - avg similarity: 1.0
 - warnings: none
+
+## LangGraph Runtime Metrics (non-benchmark)
+
+LangGraph adapter metrics are runtime summaries, not YAML benchmark artifacts.
+
+- Source: `HelixLangGraphRunner.get_metrics_summary()` and `get_trace_json()["metrics"]`
+- Scope: the most recent LangGraph run through the adapter
+- Captured by: nodes that call `helix_openai_call`
+- Uses: actual OpenAI response `usage`
+- Includes: calls made, calls avoided, input/output/total tokens, cost, latency
+- Excludes: calls with missing response usage
+- Separation rule: do not mix these values with `benchmark_engine` suite numbers
+
+Local deterministic fallback example:
+
+- `examples/langgraph_support_agent.py` prints trace, summary, and metrics.
+- Without `OPENAI_API_KEY`, calls/tokens/cost stay zero while calls avoided reflects reused nodes.
+- With OpenAI available, wrapped calls add measured usage/cost/latency.
 
 ## Demo Coverage
 
