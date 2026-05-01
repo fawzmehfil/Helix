@@ -7,13 +7,12 @@ from typing_extensions import TypedDict
 import pytest
 
 pytest.importorskip("langgraph")
-pytest.importorskip("openai")
 
 from langgraph.graph import END, START, StateGraph
 
-from helix.adapters.langgraph import HelixLangGraphRunner
+from helix.adapters.langgraph import HelixLangGraphRunner, helix_langgraph
 from helix.adapters.langgraph.llm_wrapper import helix_openai_call
-from helix.adapters.langgraph.utils import compute_summary
+from helix.adapters.langgraph.utils import compute_summary, project_node_input
 from helix.execution_optimizer.types import ExecutionDecisionType
 
 
@@ -23,6 +22,8 @@ class SupportState(TypedDict, total=False):
     style: str
     facts: str
     response: str
+    debug_info: str
+    region: str
 
 
 class ToneInput(TypedDict):
@@ -139,3 +140,121 @@ def test_langgraph_adapter_reuses_unchanged_node_and_recomputes_changed_path():
     assert runner.get_node_metrics()["classify_tone"]["calls_avoided"] == 1
     assert runner.get_node_metrics()["extract_facts"]["calls_made"] == 1
     assert trace_json["metrics"] == metrics
+
+
+def test_helix_langgraph_helper_wraps_builder_and_preserves_trace():
+    calls: list[str] = []
+
+    def classify_tone(state: ToneInput) -> dict[str, str]:
+        calls.append("classify_tone")
+        return {"style": f"{state['tone']} support"}
+
+    builder = StateGraph(SupportState)
+    builder.add_node("classify_tone", classify_tone, input_schema=ToneInput)
+    builder.add_edge(START, "classify_tone")
+    builder.add_edge("classify_tone", END)
+
+    runner = helix_langgraph(builder)
+
+    first = runner.invoke({"tone": "friendly"})
+    calls.clear()
+    second = runner.invoke({"tone": "friendly"})
+
+    assert first["style"] == "friendly support"
+    assert second["style"] == "friendly support"
+    assert calls == []
+    assert runner.get_trace()[0].step_id == "classify_tone"
+    assert runner.get_trace()[0].decision == "cache_hit"
+    assert isinstance(runner, HelixLangGraphRunner)
+
+
+def test_helix_langgraph_helper_wraps_compiled_graph():
+    def classify_tone(state: ToneInput) -> dict[str, str]:
+        return {"style": f"{state['tone']} support"}
+
+    builder = StateGraph(SupportState)
+    builder.add_node("classify_tone", classify_tone, input_schema=ToneInput)
+    builder.add_edge(START, "classify_tone")
+    builder.add_edge("classify_tone", END)
+
+    runner = helix_langgraph(builder.compile())
+    result = runner.invoke({"tone": "calm"})
+
+    assert result["style"] == "calm support"
+    assert isinstance(runner, HelixLangGraphRunner)
+
+
+def test_langgraph_without_node_inputs_keeps_full_state_cache_behavior():
+    calls: list[str] = []
+
+    def summarize(state: SupportState) -> dict[str, str]:
+        calls.append("summarize")
+        return {"response": f"{state['ticket']} / {state.get('debug_info', '')}"}
+
+    builder = StateGraph(SupportState)
+    builder.add_node("summarize", summarize)
+    builder.add_edge(START, "summarize")
+    builder.add_edge("summarize", END)
+    runner = helix_langgraph(builder)
+
+    runner.invoke({"ticket": "invoice 100", "debug_info": "a"})
+    calls.clear()
+    runner.invoke({"ticket": "invoice 100", "debug_info": "b"})
+
+    assert calls == ["summarize"]
+    assert runner.get_trace()[0].decision == "execute"
+    assert runner.get_trace()[0].reason == "input changed: debug_info"
+
+
+def test_langgraph_node_inputs_ignore_unrelated_state_and_recompute_relevant_fields():
+    calls: list[str] = []
+
+    def summarize(state: SupportState) -> dict[str, str]:
+        calls.append("summarize")
+        return {"response": f"{state['ticket']} / {state.get('debug_info', '')}"}
+
+    builder = StateGraph(SupportState)
+    builder.add_node("summarize", summarize)
+    builder.add_edge(START, "summarize")
+    builder.add_edge("summarize", END)
+    runner = helix_langgraph(builder, node_inputs={"summarize": ["ticket"]})
+
+    first = runner.invoke({"ticket": "invoice 100", "debug_info": "a"})
+    calls.clear()
+    second = runner.invoke({"ticket": "invoice 100", "debug_info": "b"})
+    third = runner.invoke({"ticket": "invoice 200", "debug_info": "b"})
+
+    assert first["response"] == "invoice 100 / a"
+    assert second["response"] == "invoice 100 / a"
+    assert third["response"] == "invoice 200 / b"
+    assert calls == ["summarize"]
+    assert runner.get_trace()[0].decision == "execute"
+    assert runner.get_trace()[0].reason == "input changed: ticket"
+
+
+def test_langgraph_node_inputs_missing_fields_are_stable_none_values():
+    calls: list[str] = []
+
+    def summarize(state: SupportState) -> dict[str, str]:
+        calls.append("summarize")
+        return {"response": state["ticket"]}
+
+    builder = StateGraph(SupportState)
+    builder.add_node("summarize", summarize)
+    builder.add_edge(START, "summarize")
+    builder.add_edge("summarize", END)
+    runner = helix_langgraph(builder, node_inputs={"summarize": ["ticket", "region"]})
+
+    assert project_node_input({"ticket": "invoice 100"}, ["ticket", "region"]) == {
+        "ticket": "invoice 100",
+        "region": None,
+    }
+    runner.invoke({"ticket": "invoice 100", "debug_info": "a"})
+    first_hash = runner.get_trace()[0].input_hash
+    calls.clear()
+    runner.invoke({"ticket": "invoice 100", "debug_info": "b"})
+    second_hash = runner.get_trace()[0].input_hash
+
+    assert calls == []
+    assert first_hash == second_hash
+    assert runner.get_trace()[0].decision == "cache_hit"

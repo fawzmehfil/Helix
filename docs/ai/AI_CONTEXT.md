@@ -135,6 +135,8 @@ Older semantic reuse smoke benchmark, `benchmark_results/20260429_023259/results
 - benchmark suite manifest and Markdown `REPORT.md` generation from existing JSON artifacts
 - customer support update demo showing stable agent steps vs changed billing facts
 - LangGraph adapter for real agent runtime optimization
+- LangGraph-first helper API: `helix_langgraph(graph_or_builder, ...)`
+- LangGraph field-level input projection via `node_inputs={node: [fields...]}` to avoid cache key pollution
 - LangGraph node-level trace, run summary, and JSON export
 - LangGraph runtime metrics for wrapped OpenAI calls: calls, avoided calls, tokens, cost, latency
 
@@ -144,6 +146,7 @@ Older semantic reuse smoke benchmark, `benchmark_results/20260429_023259/results
 - no LangChain adapter yet
 - LangGraph metrics are runtime summaries, not benchmark_engine benchmark artifacts
 - LangGraph token/cost metrics require nodes to use `helix_openai_call`; calls without response usage are skipped
+- LangGraph `node_inputs` is explicit; if omitted, adapter keeps full-state cache behavior for backwards compatibility
 - no distributed execution yet
 - semantic reuse requires threshold and review tuning
 - real benchmarking depends on provider API credentials, latency variance, and rate limits

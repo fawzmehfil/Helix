@@ -82,7 +82,9 @@ Key files:
 ### `helix/adapters/langgraph/`
 
 - wraps compiled LangGraph nodes without changing LangGraph control flow
+- provides `helix_langgraph(...)` as a small helper over `HelixLangGraphRunner`
 - maps each LangGraph node execution to one Helix cache decision
+- supports explicit `node_inputs` projection so cache keys only include relevant state fields
 - exposes node trace, run summary, and JSON export
 - collects runtime OpenAI metrics through `helix_openai_call`
 - keeps LangGraph runtime metrics separate from YAML `benchmark_engine`
@@ -90,6 +92,7 @@ Key files:
 Key files:
 
 - `runner.py`
+- `helper.py`
 - `utils.py`
 - `llm_wrapper.py`
 

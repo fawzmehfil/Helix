@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import copy
 from dataclasses import asdict, dataclass
-from typing import Any
+from typing import Any, Sequence
 
 
 @dataclass(frozen=True)
@@ -43,6 +44,22 @@ def shallow_changed_fields(previous: Any, current: Any) -> list[str]:
         return []
     keys = set(previous) | set(current)
     return sorted(key for key in keys if previous.get(key) != current.get(key))
+
+
+def project_node_input(node_input: Any, fields: Sequence[str] | None) -> Any:
+    """Return the cache input for a LangGraph node without mutating original state."""
+    if fields is None:
+        return node_input
+    source = node_input if isinstance(node_input, dict) else {}
+    return {field: copy_value(source.get(field)) for field in fields}
+
+
+def copy_value(value: Any) -> Any:
+    """Copy projected values so later LangGraph mutations do not affect trace diffs."""
+    try:
+        return copy.deepcopy(value)
+    except Exception:
+        return value
 
 
 def compute_summary(trace: list[TraceEntry]) -> dict[str, float | int]:

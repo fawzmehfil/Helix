@@ -7,7 +7,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Sequence
 
 from helix.cache_engine import CacheStore
 from helix.config import HelixConfig
@@ -25,6 +25,7 @@ from .utils import (
     compute_summary,
     ensure_cacheable_output,
     ensure_langgraph_available,
+    project_node_input,
     shallow_changed_fields,
     stable_json,
 )
@@ -91,12 +92,14 @@ class HelixLangGraphRunner:
         cache_path: str | None = None,
         graph_path: str | None = None,
         model_id: str = "langgraph",
+        node_inputs: dict[str, Sequence[str]] | None = None,
     ) -> None:
         """Create a LangGraph runner that preserves LangGraph execution semantics."""
         ensure_langgraph_available()
         self.original_graph = graph
         self.config = config or HelixConfig.default()
         self.model_id = model_id
+        self.node_inputs = dict(node_inputs or {})
         self.optimizer = optimizer or self._build_optimizer(cache_path, graph_path)
         self.last_run_events: list[LangGraphNodeEvent] = []
         self._trace: list[TraceEntry] = []
@@ -189,6 +192,9 @@ class HelixLangGraphRunner:
             ],
         )
 
+    def _cache_input_for_node(self, step_id: str, node_input: Any) -> Any:
+        return project_node_input(node_input, self.node_inputs.get(step_id))
+
     def _current_run_id(self) -> str:
         return self._active_run_id
 
@@ -232,18 +238,19 @@ class HelixLangGraphRunner:
         self._previous_inputs[step_id] = copy.deepcopy(node_input)
 
     def _invoke_node(self, step_id: str, bound: Any, node_input: Any, config: Any) -> Any:
-        decision = self._plan_node(step_id, node_input)
+        cache_input = self._cache_input_for_node(step_id, node_input)
+        decision = self._plan_node(step_id, cache_input)
         self._append_event(
             LangGraphNodeEvent(step_id, decision.decision, decision.cache_key, decision.reason)
         )
-        self._append_trace(self._trace_decision(step_id, node_input, decision))
+        self._append_trace(self._trace_decision(step_id, cache_input, decision))
         if decision.decision == ExecutionDecisionType.CACHE_HIT and decision.cache_entry:
             self._record_avoided_call(step_id)
-            self._remember_input(step_id, node_input)
+            self._remember_input(step_id, cache_input)
             return decision.cache_entry.response
         if decision.decision == ExecutionDecisionType.GRAPH_REUSE and decision.graph_node:
             self._record_avoided_call(step_id)
-            self._remember_input(step_id, node_input)
+            self._remember_input(step_id, cache_input)
             return decision.graph_node.response
 
         started = time.perf_counter()
@@ -252,22 +259,23 @@ class HelixLangGraphRunner:
         latency_ms = (time.perf_counter() - started) * 1000
         with self._optimizer_lock:
             self.optimizer.record_execution(decision, output, latency_ms)
-        self._remember_input(step_id, node_input)
+        self._remember_input(step_id, cache_input)
         return output
 
     async def _ainvoke_node(self, step_id: str, bound: Any, node_input: Any, config: Any) -> Any:
-        decision = self._plan_node(step_id, node_input)
+        cache_input = self._cache_input_for_node(step_id, node_input)
+        decision = self._plan_node(step_id, cache_input)
         self._append_event(
             LangGraphNodeEvent(step_id, decision.decision, decision.cache_key, decision.reason)
         )
-        self._append_trace(self._trace_decision(step_id, node_input, decision))
+        self._append_trace(self._trace_decision(step_id, cache_input, decision))
         if decision.decision == ExecutionDecisionType.CACHE_HIT and decision.cache_entry:
             self._record_avoided_call(step_id)
-            self._remember_input(step_id, node_input)
+            self._remember_input(step_id, cache_input)
             return decision.cache_entry.response
         if decision.decision == ExecutionDecisionType.GRAPH_REUSE and decision.graph_node:
             self._record_avoided_call(step_id)
-            self._remember_input(step_id, node_input)
+            self._remember_input(step_id, cache_input)
             return decision.graph_node.response
 
         started = time.perf_counter()
@@ -276,7 +284,7 @@ class HelixLangGraphRunner:
         latency_ms = (time.perf_counter() - started) * 1000
         with self._optimizer_lock:
             self.optimizer.record_execution(decision, output, latency_ms)
-        self._remember_input(step_id, node_input)
+        self._remember_input(step_id, cache_input)
         return output
 
     def _plan_node(self, step_id: str, node_input: Any):

@@ -77,9 +77,12 @@ Cached nodes do not send provider prompts and should not create global prompt-re
 LangGraph support is adapter-only:
 
 - `HelixLangGraphRunner` wraps a compiled LangGraph graph.
+- `helix_langgraph(graph_or_builder, ...)` is the preferred convenience helper and delegates to `HelixLangGraphRunner`.
 - LangGraph still owns graph structure, scheduling, state merging, and control flow.
 - Each LangGraph node name becomes a Helix `step_id`.
 - The node input received from LangGraph is serialized and passed through existing Helix cache-key logic.
+- Optional `node_inputs={node: [fields...]}` projects the cache input only; missing fields become `None`.
+- If `node_inputs` is omitted or a node is not listed, full LangGraph node input is used for backwards compatibility.
 - Cache hit returns the cached node output.
 - Miss executes the original LangGraph node normally and stores the output.
 

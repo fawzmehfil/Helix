@@ -21,6 +21,8 @@ See `AI_CONTEXT.md` for protected invariants and optimization priority order.
 - Phase 9A LangGraph adapter: node-level caching for compiled LangGraph graphs.
 - Phase 9B LangGraph trace + summary: per-node decisions, reasons, reuse rate, JSON export.
 - Phase 9C LangGraph metrics: wrapped OpenAI calls, per-node/aggregate calls, tokens, cost, latency.
+- Phase 9D LangGraph-first helper: `helix_langgraph(...)` wraps compiled or builder-like graphs.
+- Phase 9E LangGraph node input projection: `node_inputs` narrows cache keys to relevant state fields.
 
 ## Product Direction
 
@@ -58,7 +60,9 @@ Messaging guardrails:
 - LangGraph trace + summary: DONE
 - LangGraph metrics: DONE
 - LangGraph-first usage and docs: IN PROGRESS
-- Automatic graph extraction: NEXT
+- Automatic graph extraction helpers: DONE
+- Field-level LangGraph input projection: DONE
+- Automatic graph extraction beyond safe helper wrapping: NEXT
 
 ## Recommended Next Phase: Automatic Graph Extraction
 

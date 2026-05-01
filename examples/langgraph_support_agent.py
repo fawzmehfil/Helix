@@ -9,7 +9,7 @@ from typing import Any
 from rich.console import Console
 from typing_extensions import TypedDict
 
-from helix.adapters.langgraph import HelixLangGraphRunner, helix_openai_call
+from helix.adapters.langgraph import HelixLangGraphRunner, helix_langgraph, helix_openai_call
 from helix.adapters.langgraph.utils import compute_summary
 
 try:
@@ -24,6 +24,7 @@ class TicketState(TypedDict, total=False):
     subject: str
     ticket: str
     customer_tier: str
+    debug_info: str
     category: str
     context: str
     billing_facts: str
@@ -117,7 +118,8 @@ def build_graph():
 
 def print_run(console: Console, runner: HelixLangGraphRunner, label: str, result: TicketState) -> None:
     console.print(f"\n[bold]{label}[/bold]")
-    console.print(f"Response: {result['response']}")
+    preview = str(result["response"]).replace("\n", " ")[:96]
+    console.print(f"Response preview: {preview}")
     trace = runner.get_trace()
     summary = compute_summary(trace)
     console.print("\n[bold]--- Helix Trace ---[/bold]")
@@ -140,27 +142,44 @@ def print_run(console: Console, runner: HelixLangGraphRunner, label: str, result
 
 def main() -> None:
     console = Console()
+    node_inputs = {
+        "classify_ticket": ["subject"],
+        "extract_context": ["customer_tier"],
+        "extract_billing_facts": ["ticket"],
+        "draft_response": ["ticket", "category", "context", "billing_facts"],
+    }
     first_input = {
         "subject": "Refund request for invoice 100",
         "ticket": "I was charged twice for invoice 100.",
         "customer_tier": "enterprise",
+        "debug_info": "first local trace",
     }
-    modified_input = {
+    unrelated_change = {
         "subject": "Refund request for invoice 100",
-        "ticket": "I was charged twice for invoice 100 yesterday.",
+        "ticket": "I was charged twice for invoice 100.",
         "customer_tier": "enterprise",
+        "debug_info": "unrelated local trace changed",
+    }
+    relevant_change = {
+        "subject": "Refund request for invoice 100",
+        "ticket": "I was charged twice for invoice 200 yesterday.",
+        "customer_tier": "enterprise",
+        "debug_info": "unrelated local trace changed again",
     }
 
     with TemporaryDirectory() as tmp_dir:
-        runner = HelixLangGraphRunner(
+        runner = helix_langgraph(
             build_graph(),
             cache_path=f"{tmp_dir}/cache.db",
             graph_path=f"{tmp_dir}/graph.db",
+            node_inputs=node_inputs,
         )
         first = runner.invoke(first_input)
         print_run(console, runner, "Run 1: original ticket", first)
-        second = runner.invoke(modified_input)
-        print_run(console, runner, "Run 2: slightly modified ticket", second)
+        second = runner.invoke(unrelated_change)
+        print_run(console, runner, "Run 2: unrelated state change", second)
+        third = runner.invoke(relevant_change)
+        print_run(console, runner, "Run 3: targeted ticket change", third)
 
 
 if __name__ == "__main__":
