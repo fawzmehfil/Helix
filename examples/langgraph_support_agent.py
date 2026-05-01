@@ -8,7 +8,7 @@ from rich.console import Console
 from typing_extensions import TypedDict
 
 from helix.adapters.langgraph import HelixLangGraphRunner
-from helix.execution_optimizer.types import ExecutionDecisionType
+from helix.adapters.langgraph.utils import compute_summary
 
 try:
     from langgraph.graph import END, START, StateGraph
@@ -84,13 +84,18 @@ def build_graph():
 
 def print_run(console: Console, runner: HelixLangGraphRunner, label: str, result: TicketState) -> None:
     console.print(f"\n[bold]{label}[/bold]")
-    for event in runner.last_run_events:
-        status = "reused" if event.decision in {
-            ExecutionDecisionType.CACHE_HIT,
-            ExecutionDecisionType.GRAPH_REUSE,
-        } else "executed"
-        console.print(f"- {event.step_id}: {status}")
     console.print(f"Response: {result['response']}")
+    trace = runner.get_trace()
+    summary = compute_summary(trace)
+    console.print("\n[bold]--- Helix Trace ---[/bold]")
+    for entry in trace:
+        console.print(f"{entry.step_id} -> {entry.decision} ({entry.reason})")
+    console.print("\n[bold]--- Summary ---[/bold]")
+    console.print(f"- total nodes: {summary['total_nodes']}")
+    console.print(f"- reused: {summary['nodes_reused']}")
+    console.print(f"- executed: {summary['nodes_executed']}")
+    console.print(f"- reuse rate: {summary['reuse_rate']:.0%}")
+    console.print(f"- calls avoided: {summary['estimated_calls_avoided']}")
 
 
 def main() -> None:

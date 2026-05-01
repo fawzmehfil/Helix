@@ -4,7 +4,23 @@ from __future__ import annotations
 
 import importlib.util
 import json
+from dataclasses import asdict, dataclass
 from typing import Any
+
+
+@dataclass(frozen=True)
+class TraceEntry:
+    """One Helix decision for a LangGraph node execution."""
+
+    step_id: str
+    decision: str
+    reason: str
+    input_hash: str
+    dependency_info: list[str]
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a JSON-serializable representation."""
+        return asdict(self)
 
 
 def ensure_langgraph_available() -> None:
@@ -19,6 +35,28 @@ def ensure_langgraph_available() -> None:
 def stable_json(value: Any) -> str:
     """Return a deterministic JSON representation for cache input hashing."""
     return json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
+
+
+def shallow_changed_fields(previous: Any, current: Any) -> list[str]:
+    """Return shallow dict keys whose values changed, were added, or were removed."""
+    if not isinstance(previous, dict) or not isinstance(current, dict):
+        return []
+    keys = set(previous) | set(current)
+    return sorted(key for key in keys if previous.get(key) != current.get(key))
+
+
+def compute_summary(trace: list[TraceEntry]) -> dict[str, float | int]:
+    """Compute a lightweight LangGraph run summary from trace entries."""
+    total_nodes = len(trace)
+    nodes_reused = sum(1 for entry in trace if entry.decision == "cache_hit")
+    nodes_executed = sum(1 for entry in trace if entry.decision == "execute")
+    return {
+        "total_nodes": total_nodes,
+        "nodes_reused": nodes_reused,
+        "nodes_executed": nodes_executed,
+        "reuse_rate": nodes_reused / total_nodes if total_nodes else 0.0,
+        "estimated_calls_avoided": nodes_reused,
+    }
 
 
 def ensure_cacheable_output(step_id: str, output: Any) -> dict[str, Any]:

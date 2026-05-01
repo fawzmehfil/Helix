@@ -19,7 +19,14 @@ from helix.graph_engine import ComputationGraph, GraphReuser
 from helix.kv_simulator import KVSimulator
 from helix.workflow.types import Workflow, WorkflowStep, WorkflowStepType
 
-from .utils import ensure_cacheable_output, ensure_langgraph_available, stable_json
+from .utils import (
+    TraceEntry,
+    compute_summary,
+    ensure_cacheable_output,
+    ensure_langgraph_available,
+    shallow_changed_fields,
+    stable_json,
+)
 
 
 @dataclass(frozen=True)
@@ -52,6 +59,8 @@ class HelixLangGraphRunner:
         self.model_id = model_id
         self.optimizer = optimizer or self._build_optimizer(cache_path, graph_path)
         self.last_run_events: list[LangGraphNodeEvent] = []
+        self._trace: list[TraceEntry] = []
+        self._previous_inputs: dict[str, Any] = {}
         self._events_lock = threading.Lock()
         self._optimizer_lock = threading.Lock()
         self._active_run_id = str(uuid.uuid4())
@@ -145,14 +154,41 @@ class HelixLangGraphRunner:
         with self._events_lock:
             self.last_run_events.append(event)
 
+    def _trace_decision(self, step_id: str, node_input: Any, decision) -> TraceEntry:
+        previous_input = self._previous_inputs.get(step_id)
+        if decision.decision in {ExecutionDecisionType.CACHE_HIT, ExecutionDecisionType.GRAPH_REUSE}:
+            trace_decision = "cache_hit"
+            reason = "input unchanged"
+        else:
+            trace_decision = "execute"
+            changed = shallow_changed_fields(previous_input, node_input)
+            if changed:
+                reason = f"input changed: {', '.join(changed)}"
+            elif previous_input is not None:
+                reason = "input changed"
+            else:
+                reason = "no cache entry"
+        input_hash = (decision.cache_key or "")[:12]
+        return TraceEntry(step_id, trace_decision, reason, input_hash, [])
+
+    def _append_trace(self, entry: TraceEntry) -> None:
+        with self._events_lock:
+            self._trace.append(entry)
+
+    def _remember_input(self, step_id: str, node_input: Any) -> None:
+        self._previous_inputs[step_id] = copy.deepcopy(node_input)
+
     def _invoke_node(self, step_id: str, bound: Any, node_input: Any, config: Any) -> Any:
         decision = self._plan_node(step_id, node_input)
         self._append_event(
             LangGraphNodeEvent(step_id, decision.decision, decision.cache_key, decision.reason)
         )
+        self._append_trace(self._trace_decision(step_id, node_input, decision))
         if decision.decision == ExecutionDecisionType.CACHE_HIT and decision.cache_entry:
+            self._remember_input(step_id, node_input)
             return decision.cache_entry.response
         if decision.decision == ExecutionDecisionType.GRAPH_REUSE and decision.graph_node:
+            self._remember_input(step_id, node_input)
             return decision.graph_node.response
 
         started = time.perf_counter()
@@ -160,6 +196,7 @@ class HelixLangGraphRunner:
         latency_ms = (time.perf_counter() - started) * 1000
         with self._optimizer_lock:
             self.optimizer.record_execution(decision, output, latency_ms)
+        self._remember_input(step_id, node_input)
         return output
 
     async def _ainvoke_node(self, step_id: str, bound: Any, node_input: Any, config: Any) -> Any:
@@ -167,9 +204,12 @@ class HelixLangGraphRunner:
         self._append_event(
             LangGraphNodeEvent(step_id, decision.decision, decision.cache_key, decision.reason)
         )
+        self._append_trace(self._trace_decision(step_id, node_input, decision))
         if decision.decision == ExecutionDecisionType.CACHE_HIT and decision.cache_entry:
+            self._remember_input(step_id, node_input)
             return decision.cache_entry.response
         if decision.decision == ExecutionDecisionType.GRAPH_REUSE and decision.graph_node:
+            self._remember_input(step_id, node_input)
             return decision.graph_node.response
 
         started = time.perf_counter()
@@ -177,6 +217,7 @@ class HelixLangGraphRunner:
         latency_ms = (time.perf_counter() - started) * 1000
         with self._optimizer_lock:
             self.optimizer.record_execution(decision, output, latency_ms)
+        self._remember_input(step_id, node_input)
         return output
 
     def _plan_node(self, step_id: str, node_input: Any):
@@ -188,11 +229,25 @@ class HelixLangGraphRunner:
     def invoke(self, input_data: Any, **kwargs: Any) -> Any:
         """Invoke the wrapped LangGraph graph."""
         self.last_run_events = []
+        self._trace = []
         self._active_run_id = str(uuid.uuid4())
         return self.graph.invoke(input_data, **kwargs)
 
     async def ainvoke(self, input_data: Any, **kwargs: Any) -> Any:
         """Invoke the wrapped LangGraph graph asynchronously."""
         self.last_run_events = []
+        self._trace = []
         self._active_run_id = str(uuid.uuid4())
         return await self.graph.ainvoke(input_data, **kwargs)
+
+    def get_trace(self) -> list[TraceEntry]:
+        """Return the most recent LangGraph run trace."""
+        return list(self._trace)
+
+    def get_trace_json(self) -> dict[str, Any]:
+        """Return the most recent trace and summary as JSON-serializable data."""
+        trace = self.get_trace()
+        return {
+            "trace": [entry.to_dict() for entry in trace],
+            "summary": compute_summary(trace),
+        }

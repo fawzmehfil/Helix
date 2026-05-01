@@ -9,6 +9,7 @@ pytest.importorskip("langgraph")
 from langgraph.graph import END, START, StateGraph
 
 from helix.adapters.langgraph import HelixLangGraphRunner
+from helix.adapters.langgraph.utils import compute_summary
 from helix.execution_optimizer.types import ExecutionDecisionType
 
 
@@ -62,6 +63,10 @@ def test_langgraph_adapter_reuses_unchanged_node_and_recomputes_changed_path():
 
     second = runner.invoke({"ticket": "Refund request for invoice 200", "tone": "friendly"})
     second_events = {event.step_id: event.decision for event in runner.last_run_events}
+    trace = runner.get_trace()
+    summary = compute_summary(trace)
+    trace_json = runner.get_trace_json()
+    cache_trace = next(entry for entry in trace if entry.decision == "cache_hit")
 
     assert first["response"] == "friendly support: refund request for invoice 100"
     assert second["response"] == "friendly support: refund request for invoice 200"
@@ -75,3 +80,18 @@ def test_langgraph_adapter_reuses_unchanged_node_and_recomputes_changed_path():
     assert second_events["classify_tone"] == ExecutionDecisionType.CACHE_HIT
     assert second_events["extract_facts"] == ExecutionDecisionType.EXECUTE
     assert second_events["draft_response"] == ExecutionDecisionType.EXECUTE
+    assert len(trace) == 3
+    assert {entry.decision for entry in trace} >= {"cache_hit", "execute"}
+    assert cache_trace.input_hash
+    assert cache_trace.reason == "input unchanged"
+    assert any(entry.reason.startswith("input changed:") for entry in trace)
+    assert summary == {
+        "total_nodes": 3,
+        "nodes_reused": 1,
+        "nodes_executed": 2,
+        "reuse_rate": 1 / 3,
+        "estimated_calls_avoided": 1,
+    }
+    assert trace_json["summary"] == summary
+    assert len(trace_json["trace"]) == 3
+    assert trace_json["trace"][0]["step_id"] == trace[0].step_id
